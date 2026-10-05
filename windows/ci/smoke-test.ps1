@@ -19,8 +19,9 @@ $pgIsReady = Join-Path $PgRoot "bin\pg_isready.exe"
 $psql = Join-Path $PgRoot "bin\psql.exe"
 
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
-$dataDir = Join-Path $tempRoot "pg_bigm-pg$PostgreSqlMajor-data"
-$logFile = Join-Path $tempRoot "pg_bigm-pg$PostgreSqlMajor.log"
+$dataDir = Join-Path $tempRoot "pg_hint_plan-pg$PostgreSqlMajor-data"
+$logFile = Join-Path $tempRoot "pg_hint_plan-pg$PostgreSqlMajor.log"
+$setupSql = Join-Path $tempRoot "pg_hint_plan-setup.sql"
 
 if (Test-Path $dataDir) {
     Remove-Item $dataDir -Recurse -Force
@@ -34,7 +35,7 @@ if ($LASTEXITCODE -ne 0) {
 function Show-PostgresLog {
     if (Test-Path $logFile) {
         Write-Host "----- PostgreSQL log -----"
-        Get-Content $logFile -Tail 200
+        Get-Content $logFile -Tail 250
         Write-Host "--------------------------"
     }
 }
@@ -45,7 +46,6 @@ function Wait-Postgres {
         if ($LASTEXITCODE -eq 0) {
             return
         }
-
         Start-Sleep -Seconds 2
     }
 
@@ -54,41 +54,57 @@ function Wait-Postgres {
 }
 
 try {
-    & $pgCtl -D $dataDir -l $logFile -o "-p $PgPort -c shared_preload_libraries=pg_bigm" start
+    $serverOptions = "-p $PgPort -c shared_preload_libraries=pg_hint_plan"
+
+    & $pgCtl -D $dataDir -l $logFile -o $serverOptions start
     if ($LASTEXITCODE -ne 0) {
         Show-PostgresLog
-        throw "Failed to start temporary PostgreSQL cluster."
+        throw "Failed to start PostgreSQL with pg_hint_plan preloaded."
     }
 
     Wait-Postgres
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP EXTENSION IF EXISTS pg_bigm CASCADE;"
+    @'
+CREATE EXTENSION pg_hint_plan;
+DROP TABLE IF EXISTS public.pgextwin_hint_probe;
+CREATE TABLE public.pgextwin_hint_probe (
+    id integer PRIMARY KEY,
+    payload text NOT NULL
+);
+INSERT INTO public.pgextwin_hint_probe
+SELECT g, repeat('x', 100)
+FROM generate_series(1, 50000) AS g;
+ANALYZE public.pgextwin_hint_probe;
+'@ | Set-Content -Path $setupSql -Encoding utf8
+
+    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -f $setupSql
     if ($LASTEXITCODE -ne 0) {
-        throw "DROP EXTENSION pre-clean failed."
+        throw "pg_hint_plan setup failed."
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_bigm;"
+    $seqPlan = (& $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "/*+ SeqScan(pgextwin_hint_probe) */ EXPLAIN (COSTS OFF) SELECT * FROM public.pgextwin_hint_probe WHERE id = 4242;") -join [Environment]::NewLine
     if ($LASTEXITCODE -ne 0) {
-        throw "CREATE EXTENSION pg_bigm failed."
+        throw "SeqScan hint EXPLAIN failed."
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS ci_bigm; CREATE TABLE ci_bigm(v text); INSERT INTO ci_bigm VALUES ('abcdef'), ('uvwxyz'); CREATE INDEX ci_bigm_idx ON ci_bigm USING gin (v gin_bigm_ops);"
-    if ($LASTEXITCODE -ne 0) {
-        throw "pg_bigm GIN index setup failed."
+    if ($seqPlan -notmatch 'Seq Scan on pgextwin_hint_probe') {
+        Show-PostgresLog
+        throw "SeqScan hint was not applied. Plan: $seqPlan"
     }
 
-    $count = (
-        & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "SET enable_seqscan=off; SELECT count(*) FROM ci_bigm WHERE v LIKE likequery('bcd');"
-    ) | Select-Object -Last 1
-
-    $countText = ([string]$count).Trim()
-    if ($LASTEXITCODE -ne 0 -or $countText -ne "1") {
-        throw "pg_bigm search smoke test failed. Expected 1 row, got '$countText'."
+    $indexPlan = (& $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "/*+ IndexScan(pgextwin_hint_probe pgextwin_hint_probe_pkey) */ EXPLAIN (COSTS OFF) SELECT * FROM public.pgextwin_hint_probe WHERE id = 4242;") -join [Environment]::NewLine
+    if ($LASTEXITCODE -ne 0) {
+        throw "IndexScan hint EXPLAIN failed."
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE ci_bigm; DROP EXTENSION pg_bigm;"
+    if ($indexPlan -notmatch 'Index Scan using pgextwin_hint_probe_pkey on pgextwin_hint_probe') {
+        Show-PostgresLog
+        throw "IndexScan hint was not applied. Plan: $indexPlan"
+    }
+
+    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE public.pgextwin_hint_probe; DROP EXTENSION pg_hint_plan;"
     if ($LASTEXITCODE -ne 0) {
-        throw "Smoke-test cleanup failed."
+        throw "pg_hint_plan smoke-test cleanup failed."
     }
 }
 catch {
