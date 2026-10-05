@@ -44,7 +44,7 @@ As of 2026-10-05:
 | 17 | 17.11 | 2029-11-08 |
 | 18 | 18.6 | 2030-11-14 |
 
-PostgreSQL 14 is therefore included today, but the workflow automatically excludes entries whose configured EOL date has passed. The version metadata is kept in **config/postgresql.json**.
+PostgreSQL 14 is therefore included today, but the shared pgextwin workflow automatically excludes entries whose configured EOL date has passed. PostgreSQL lifecycle metadata is maintained centrally in **pgextwin/build**, while this repository declares its supported range in **config/extension.json**.
 
 Only Windows x64 is published.
 
@@ -98,17 +98,19 @@ For complete installation, configuration, SQL usage, and upgrade instructions, u
 
 ## CI/CD
 
-**.github/workflows/windows.yml** performs the following for every maintained PostgreSQL major version:
+**.github/workflows/windows.yml** delegates the common CI/CD mechanics to the reusable workflow in **pgextwin/build**.
 
-1. Read the supported-version matrix from **config/postgresql.json**.
-2. Exclude PostgreSQL versions whose EOL date has passed.
-3. Check out the pinned official pg_bigm source.
-4. Install the matching PostgreSQL Windows x64 distribution.
-5. Build **pg_bigm.dll** with MSVC and CMake.
-6. Install the extension into the test PostgreSQL instance.
-7. Restart PostgreSQL with pg_bigm preloaded.
-8. Run **CREATE EXTENSION pg_bigm** and a basic GIN/index search smoke test.
-9. Package a per-major ZIP and upload it as a GitHub Actions artifact.
+For each eligible PostgreSQL major version, the shared workflow:
+
+1. Combines centralized PostgreSQL lifecycle metadata with **config/extension.json**.
+2. Excludes PostgreSQL versions whose EOL date has passed.
+3. Checks out the pinned official pg_bigm source.
+4. Installs the matching PostgreSQL Windows x64 distribution.
+5. Calls this repository's extension-specific hooks under **windows/ci/**.
+6. Builds **pg_bigm.dll** with MSVC and CMake.
+7. Installs the extension into the test PostgreSQL instance.
+8. Runs **CREATE EXTENSION pg_bigm** and a basic GIN/index search smoke test.
+9. Packages a per-major ZIP and uploads it as a GitHub Actions artifact.
 
 Pull requests and pushes to **main** run CI only.
 
@@ -128,21 +130,15 @@ After every matrix build and smoke test succeeds, the release job creates the ma
 
 ## Updating PostgreSQL support
 
-When PostgreSQL publishes new minor releases or a major version reaches EOL, update **config/postgresql.json**.
+PostgreSQL minor-version, package, and EOL metadata is maintained centrally in **pgextwin/build**.
 
-The **eol** field controls automatic inclusion at build time. A major version is not built after its configured EOL date.
-
-When a new PostgreSQL major release becomes supported by pg_bigm upstream:
-
-1. Confirm upstream pg_bigm support.
-2. Add the PostgreSQL major/minor/package metadata to **config/postgresql.json**.
-3. Let CI build and smoke-test it before publishing a Release.
+This repository controls only pg_bigm's allowed PostgreSQL range in **config/extension.json**. When pg_bigm upstream adds or removes compatibility with a major PostgreSQL version, update that manifest and let the shared CI build and smoke-test the complete resulting matrix before publishing a Release.
 
 ## Updating pg_bigm
 
 When pg_bigm publishes a new upstream release:
 
-1. Update **upstream.ref** and **upstream.version** in **config/postgresql.json**.
+1. Update **upstream.ref** and **upstream.version** in **config/extension.json**.
 2. Update this README's upstream version references.
 3. Run CI for all maintained PostgreSQL majors.
 4. Publish a new Windows release only after the complete matrix passes.
