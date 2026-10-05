@@ -1,5 +1,7 @@
 # pg_bigm Windows binaries
 
+[**日本語**](README_ja.md) | English
+
 This repository provides **unofficial Windows x64 binaries** of [pg_bigm](https://github.com/pgbigm/pg_bigm).
 
 pg_bigm itself is developed and maintained by the pg_bigm Development Group.
@@ -13,6 +15,20 @@ For pg_bigm features, SQL usage, configuration, limitations, and other product d
 - License: PostgreSQL License (same license text as upstream)
 
 The CI/CD pipeline checks out the upstream source at the pinned tag and builds it without carrying a forked copy of the pg_bigm C sources in this repository.
+
+## Documentation
+
+### This repository
+
+- [Japanese README / 日本語README](README_ja.md)
+- [Windows x64 binary guide / Windows x64 バイナリ利用ガイド（日本語）](docs/windows_ja.md)
+
+### Official pg_bigm documentation
+
+- [Release 1.2 - 日本語](https://github.com/pgbigm/pg_bigm/blob/REL1_2_STABLE/docs/pg_bigm.md)
+- [Release 1.2 - English](https://github.com/pgbigm/pg_bigm/blob/REL1_2_STABLE/docs/pg_bigm_en.md)
+
+Use this repository's documentation for Windows-specific binary placement and packaging details. For pg_bigm product behavior, SQL APIs, configuration parameters, features, and limitations, follow the official upstream documentation.
 
 ## Supported PostgreSQL versions
 
@@ -108,7 +124,7 @@ For example:
 release/v1.2-20250903-windows.1
 ~~~
 
-After every matrix build and smoke test succeeds, the release job creates the matching GitHub Release and attaches all ZIP files plus **SHA256SUMS.txt**. The release is not created if any supported PostgreSQL build fails.
+After every matrix build and smoke test succeeds, the release job creates the matching GitHub Release and attaches all ZIP files plus **SHA256SUMS.txt**. If the matching Release already exists, the job updates its release notes instead of creating a duplicate Release. No Release operation runs if any supported PostgreSQL build fails.
 
 ## Updating PostgreSQL support
 
