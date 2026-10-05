@@ -28,128 +28,93 @@ if (-not (Test-Path $vsDevCmd)) {
 
 $meta = Get-Content (Join-Path $UpstreamDir "META.json") -Raw | ConvertFrom-Json
 $repackVersion = [string]$meta.version
-if ($repackVersion -ne "1.5.3") {
-    throw "Unexpected pg_repack version: $repackVersion"
+if ([string]::IsNullOrWhiteSpace($repackVersion)) {
+    throw "Could not determine pg_repack version from META.json."
 }
 
-# Windows frontend compatibility patch 1:
-# use the frontend umbrella header instead of backend c.h.
-$pgutHeaderPath = Join-Path $UpstreamDir "bin\pgut\pgut.h"
-$pgutHeader = Get-Content $pgutHeaderPath -Raw
-$oldHeader = '#include "c.h"'
-$newHeader = @'
+# Apply the two minimal Windows compatibility changes demonstrated by the
+# maintained VS2022 community port. The checkout is disposable; pgextwin does
+# not vendor or maintain a forked copy of upstream C sources.
+$pgutHeader = Join-Path $UpstreamDir "bin\pgut\pgut.h"
+$headerText = Get-Content $pgutHeader -Raw
+$plainInclude = '#include "c.h"'
+$patchedInclude = @'
 #ifndef WIN32
 #include "c.h"
 #else
 #include "postgres_fe.h"
 #endif
 '@
-if (-not $pgutHeader.Contains($oldHeader)) {
-    throw "Expected pgut.h include was not found; review upstream before continuing."
+
+if ($headerText.Contains($plainInclude)) {
+    $headerText = $headerText.Replace($plainInclude, $patchedInclude.TrimEnd())
+    Set-Content -Path $pgutHeader -Value $headerText -Encoding utf8
+    Write-Host "Patched pgut.h to use postgres_fe.h on Windows."
 }
-$pgutHeader = $pgutHeader.Replace($oldHeader, $newHeader.TrimEnd())
-Set-Content -Path $pgutHeaderPath -Value $pgutHeader -Encoding utf8
-
-# Windows frontend compatibility patch 2:
-# only include poll/select headers when PostgreSQL configuration says they exist.
-$clientPath = Join-Path $UpstreamDir "bin\pg_repack.c"
-$clientSource = Get-Content $clientPath -Raw
-$oldIncludes = @'
-#include <unistd.h>
-#include <time.h>
-#include <poll.h>
-#include <sys/poll.h>
-#include <sys/select.h>
-'@
-$newIncludes = @'
-#include <unistd.h>
-#include <time.h>
-
-#ifdef HAVE_POLL_H
-#include <poll.h>
-#endif
-#ifdef HAVE_SYS_POLL_H
-#include <sys/poll.h>
-#endif
-#ifdef HAVE_SYS_SELECT_H
-#include <sys/select.h>
-#endif
-'@
-if (-not $clientSource.Contains($oldIncludes.Trim())) {
-    throw "Expected pg_repack.c poll/select include block was not found; review upstream before continuing."
+elseif (-not $headerText.Contains('#include "postgres_fe.h"')) {
+    throw "Expected pgut.h frontend include was not found; review upstream before continuing."
 }
-$clientSource = $clientSource.Replace($oldIncludes.Trim(), $newIncludes.Trim())
-Set-Content -Path $clientPath -Value $clientSource -Encoding utf8
 
-# Windows frontend compatibility patch 3:
-# initialize the cancel critical section before the two lock sites.
-$pgutPath = Join-Path $UpstreamDir "bin\pgut\pgut.c"
-$pgutSource = Get-Content $pgutPath -Raw
-$lockNeedle = @'
-#ifdef WIN32
-	EnterCriticalSection(&cancelConnLock);
-#endif
-'@
-$lockReplacement = @'
-#ifdef WIN32
-	init_cancel_handler();
-	EnterCriticalSection(&cancelConnLock);
-#endif
-'@
-$lockCount = ([regex]::Matches($pgutSource, [regex]::Escape($lockNeedle.Trim()))).Count
-if ($lockCount -ne 2) {
-    throw "Expected exactly two Windows cancel-lock sites, found $lockCount; review upstream before continuing."
-}
-$pgutSource = $pgutSource.Replace($lockNeedle.Trim(), $lockReplacement.Trim())
-Set-Content -Path $pgutPath -Value $pgutSource -Encoding utf8
+$pgutSource = Join-Path $UpstreamDir "bin\pgut\pgut.c"
+$pgutText = Get-Content $pgutSource -Raw
 
-# Generate extension metadata like the upstream Makefile (PG12+ uses false
-# instead of the removed relhasoids catalog column).
-$controlTemplate = Get-Content (Join-Path $UpstreamDir "lib\pg_repack.control.in") -Raw
-$controlTemplate.Replace("REPACK_VERSION", $repackVersion) |
-    Set-Content (Join-Path $UpstreamDir "lib\pg_repack.control") -Encoding utf8
-
-$sqlTemplate = Get-Content (Join-Path $UpstreamDir "lib\pg_repack.sql.in") -Raw
-$sqlTemplate.Replace("REPACK_VERSION", $repackVersion).Replace("relhasoids", "false") |
-    Set-Content (Join-Path $UpstreamDir "lib\pg_repack--$repackVersion.sql") -Encoding utf8
-
-# Upstream ships the canonical DLL export list.
-$defLines = @("LIBRARY pg_repack", "EXPORTS")
-foreach ($line in Get-Content (Join-Path $UpstreamDir "lib\exports.txt")) {
-    $trimmed = $line.Trim()
-    if ($trimmed -eq "") {
-        continue
+foreach ($functionName in @("on_before_exec", "on_after_exec")) {
+    $functionMarker = "$functionName(pgutConn *conn)"
+    $functionStart = $pgutText.IndexOf($functionMarker, [StringComparison]::Ordinal)
+    if ($functionStart -lt 0) {
+        throw "Expected function '$functionName' was not found in pgut.c."
     }
 
-    $name = ($trimmed -split '\s+')[0]
-    $defLines += "    $name"
+    $nextFunction = $pgutText.IndexOf("static void", $functionStart + $functionMarker.Length, [StringComparison]::Ordinal)
+    if ($nextFunction -lt 0) {
+        $nextFunction = $pgutText.Length
+    }
+
+    $lockMarker = "EnterCriticalSection(&cancelConnLock);"
+    $lockPosition = $pgutText.IndexOf($lockMarker, $functionStart, [StringComparison]::Ordinal)
+    if ($lockPosition -lt 0 -or $lockPosition -ge $nextFunction) {
+        throw "Expected Windows cancel lock was not found in '$functionName'."
+    }
+
+    $segment = $pgutText.Substring($functionStart, $lockPosition - $functionStart)
+    if ($segment -notmatch 'init_cancel_handler\(\);') {
+        $insertText = "init_cancel_handler();" + [Environment]::NewLine + [char]9
+        $pgutText = $pgutText.Insert($lockPosition, $insertText)
+    }
 }
-$defPath = Join-Path $UpstreamDir "lib\pg_repack.pgextwin.def"
-$defLines | Set-Content $defPath -Encoding ascii
+
+Set-Content -Path $pgutSource -Value $pgutText -Encoding utf8
+
+# Generate extension control and SQL exactly as upstream PGXS does for
+# PostgreSQL 12+, which covers every pgextwin target.
+$controlTemplate = Join-Path $UpstreamDir "lib\pg_repack.control.in"
+$sqlTemplate = Join-Path $UpstreamDir "lib\pg_repack.sql.in"
+$controlOut = Join-Path $UpstreamDir "lib\pg_repack.control"
+$sqlOut = Join-Path $UpstreamDir "lib\pg_repack--$repackVersion.sql"
+
+(Get-Content $controlTemplate -Raw).Replace("REPACK_VERSION", $repackVersion) |
+    Set-Content -Path $controlOut -Encoding utf8
+
+(Get-Content $sqlTemplate -Raw).
+    Replace("REPACK_VERSION", $repackVersion).
+    Replace("relhasoids", "false") |
+    Set-Content -Path $sqlOut -Encoding utf8
+
+# Reuse upstream's explicit Windows export list for the server DLL.
+$exportsPath = Join-Path $UpstreamDir "lib\exports.txt"
+$defPath = Join-Path $UpstreamDir "pg_repack.pgextwin.def"
+(@("LIBRARY pg_repack", "EXPORTS") + (Get-Content $exportsPath)) |
+    Set-Content -Path $defPath -Encoding ascii
+
+foreach ($library in @("postgres.lib", "libpq.lib", "libintl.lib", "libpgport.lib", "libpgcommon.lib")) {
+    $path = Join-Path $PgRoot "lib\$library"
+    if (-not (Test-Path $path)) {
+        throw "Required PostgreSQL library was not found: $path"
+    }
+}
 
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $cmdFile = Join-Path $tempRoot "pg_repack-build.cmd"
-
-$serverIncludeArgs = @(
-    "$PgRoot\include\server\port\win32_msvc",
-    "$PgRoot\include\server\port\win32",
-    "$PgRoot\include\server",
-    "$PgRoot\include",
-    "$UpstreamDir\lib",
-    "$UpstreamDir\lib\pgut"
-) | ForEach-Object { '/I"' + $_ + '"' }
-$serverIncludeArgs = $serverIncludeArgs -join " "
-
-$clientIncludeArgs = @(
-    "$PgRoot\include\server\port\win32_msvc",
-    "$PgRoot\include\server\port\win32",
-    "$PgRoot\include\server",
-    "$PgRoot\include\internal",
-    "$PgRoot\include",
-    "$UpstreamDir\bin",
-    "$UpstreamDir\bin\pgut"
-) | ForEach-Object { '/I"' + $_ + '"' }
-$clientIncludeArgs = $clientIncludeArgs -join " "
 
 @"
 @echo off
@@ -157,46 +122,68 @@ call "$vsDevCmd" -arch=x64 -host_arch=x64
 if errorlevel 1 exit /b %errorlevel%
 cd /d "$UpstreamDir"
 
-cl /nologo /O2 /MD /DWIN32 /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
-  $serverIncludeArgs ^
-  /c "$UpstreamDir\lib\repack.c" /Fo"$UpstreamDir\lib\repack.obj"
+rem Server extension DLL
+cl /nologo /O2 /MD /DWIN32 /DNOGDI /DNOMINMAX /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
+  /I"$PgRoot\include\server\port\win32_msvc" ^
+  /I"$PgRoot\include\server\port\win32" ^
+  /I"$PgRoot\include\server" ^
+  /I"$PgRoot\include\internal" ^
+  /I"$PgRoot\include" ^
+  /I"$UpstreamDir\lib\pgut" ^
+  /c "$UpstreamDir\lib\repack.c" /Fo"$UpstreamDir\repack.obj"
 if errorlevel 1 exit /b %errorlevel%
 
-cl /nologo /O2 /MD /DWIN32 /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
-  $serverIncludeArgs ^
-  /c "$UpstreamDir\lib\pgut\pgut-spi.c" /Fo"$UpstreamDir\lib\pgut-spi.obj"
+cl /nologo /O2 /MD /DWIN32 /DNOGDI /DNOMINMAX /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
+  /I"$PgRoot\include\server\port\win32_msvc" ^
+  /I"$PgRoot\include\server\port\win32" ^
+  /I"$PgRoot\include\server" ^
+  /I"$PgRoot\include\internal" ^
+  /I"$PgRoot\include" ^
+  /I"$UpstreamDir\lib\pgut" ^
+  /c "$UpstreamDir\lib\pgut\pgut-spi.c" /Fo"$UpstreamDir\pgut-spi.obj"
 if errorlevel 1 exit /b %errorlevel%
 
 link /nologo /DLL /OUT:"$UpstreamDir\pg_repack.dll" /DEF:"$defPath" ^
-  "$UpstreamDir\lib\repack.obj" ^
-  "$UpstreamDir\lib\pgut-spi.obj" ^
-  "$PgRoot\lib\postgres.lib"
+  "$UpstreamDir\repack.obj" "$UpstreamDir\pgut-spi.obj" ^
+  "$PgRoot\lib\postgres.lib" "$PgRoot\lib\libpq.lib" "$PgRoot\lib\libintl.lib" ^
+  "$PgRoot\lib\libpgport.lib" "$PgRoot\lib\libpgcommon.lib" ws2_32.lib advapi32.lib
 if errorlevel 1 exit /b %errorlevel%
 
-cl /nologo /O2 /MD /DWIN32 /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
-  $clientIncludeArgs ^
-  /c "$UpstreamDir\bin\pg_repack.c" /Fo"$UpstreamDir\bin\pg_repack.obj"
+rem Client executable
+cl /nologo /O2 /MD /DWIN32 /DNOGDI /DNOMINMAX /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
+  /I"$PgRoot\include\server\port\win32_msvc" ^
+  /I"$PgRoot\include\server\port\win32" ^
+  /I"$PgRoot\include\server" ^
+  /I"$PgRoot\include\internal" ^
+  /I"$PgRoot\include" ^
+  /I"$UpstreamDir\bin\pgut" ^
+  /c "$UpstreamDir\bin\pg_repack.c" /Fo"$UpstreamDir\pg_repack-client.obj"
 if errorlevel 1 exit /b %errorlevel%
 
-cl /nologo /O2 /MD /DWIN32 /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
-  $clientIncludeArgs ^
-  /c "$UpstreamDir\bin\pgut\pgut.c" /Fo"$UpstreamDir\bin\pgut.obj"
+cl /nologo /O2 /MD /DWIN32 /DNOGDI /DNOMINMAX /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
+  /I"$PgRoot\include\server\port\win32_msvc" ^
+  /I"$PgRoot\include\server\port\win32" ^
+  /I"$PgRoot\include\server" ^
+  /I"$PgRoot\include\internal" ^
+  /I"$PgRoot\include" ^
+  /I"$UpstreamDir\bin\pgut" ^
+  /c "$UpstreamDir\bin\pgut\pgut.c" /Fo"$UpstreamDir\pgut.obj"
 if errorlevel 1 exit /b %errorlevel%
 
-cl /nologo /O2 /MD /DWIN32 /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
-  $clientIncludeArgs ^
-  /c "$UpstreamDir\bin\pgut\pgut-fe.c" /Fo"$UpstreamDir\bin\pgut-fe.obj"
+cl /nologo /O2 /MD /DWIN32 /DNOGDI /DNOMINMAX /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS /DREPACK_VERSION=$repackVersion ^
+  /I"$PgRoot\include\server\port\win32_msvc" ^
+  /I"$PgRoot\include\server\port\win32" ^
+  /I"$PgRoot\include\server" ^
+  /I"$PgRoot\include\internal" ^
+  /I"$PgRoot\include" ^
+  /I"$UpstreamDir\bin\pgut" ^
+  /c "$UpstreamDir\bin\pgut\pgut-fe.c" /Fo"$UpstreamDir\pgut-fe.obj"
 if errorlevel 1 exit /b %errorlevel%
 
 link /nologo /OUT:"$UpstreamDir\pg_repack.exe" ^
-  "$UpstreamDir\bin\pg_repack.obj" ^
-  "$UpstreamDir\bin\pgut.obj" ^
-  "$UpstreamDir\bin\pgut-fe.obj" ^
-  "$PgRoot\lib\libpq.lib" ^
-  "$PgRoot\lib\libpgport.lib" ^
-  "$PgRoot\lib\libpgcommon.lib" ^
-  "$PgRoot\lib\libintl.lib" ^
-  ws2_32.lib advapi32.lib secur32.lib crypt32.lib
+  "$UpstreamDir\pg_repack-client.obj" "$UpstreamDir\pgut.obj" "$UpstreamDir\pgut-fe.obj" ^
+  "$PgRoot\lib\libpq.lib" "$PgRoot\lib\libintl.lib" "$PgRoot\lib\libpgport.lib" "$PgRoot\lib\libpgcommon.lib" ^
+  ws2_32.lib advapi32.lib
 if errorlevel 1 exit /b %errorlevel%
 "@ | Set-Content -Path $cmdFile -Encoding ascii
 
@@ -208,12 +195,17 @@ if ($LASTEXITCODE -ne 0) {
 foreach ($output in @(
     (Join-Path $UpstreamDir "pg_repack.dll"),
     (Join-Path $UpstreamDir "pg_repack.exe"),
-    (Join-Path $UpstreamDir "lib\pg_repack.control"),
-    (Join-Path $UpstreamDir "lib\pg_repack--$repackVersion.sql")
+    $controlOut,
+    $sqlOut
 )) {
     if (-not (Test-Path $output)) {
         throw "Expected pg_repack build output was not produced: $output"
     }
 }
 
-Write-Host "Built pg_repack $repackVersion server extension and client executable."
+& (Join-Path $UpstreamDir "pg_repack.exe") --version
+if ($LASTEXITCODE -ne 0) {
+    throw "Built pg_repack.exe could not execute --version."
+}
+
+Write-Host "Built pg_repack $repackVersion Windows client and extension DLL."
