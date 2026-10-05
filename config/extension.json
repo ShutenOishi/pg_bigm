@@ -1,20 +1,23 @@
 {
   "schemaVersion": 1,
-  "name": "pg_bigm",
+  "name": "pg_hint_plan",
   "upstream": {
-    "repository": "pgbigm/pg_bigm",
-    "ref": "v1.2-20250903",
-    "version": "1.2"
+    "repository": "ossc-db/pg_hint_plan",
+    "perPostgresql": {
+      "14": { "ref": "REL14_1_4_4", "version": "1.4.4" }
+    }
   },
   "postgresql": {
-    "minMajor": 14,
-    "maxMajor": 18
+    "majors": [14]
   },
   "windows": {
     "architecture": "x64"
   },
   "license": {
     "verifyAgainstUpstream": true,
-    "upstreamPath": "LICENSE"
+    "files": [
+      { "repositoryPath": "COPYRIGHT", "upstreamPath": "COPYRIGHT" },
+      { "repositoryPath": "COPYRIGHT.postgresql", "upstreamPath": "COPYRIGHT.postgresql" }
+    ]
   }
 }
