@@ -53,7 +53,7 @@ PostgreSQL 14は現時点では対象ですが、設定済みEOL日を過ぎる�
 
 ## ダウンロード
 
-このリポジトリの [Releases](https://github.com/ShutenOishi/pg_bigm/releases) から、使用しているPostgreSQLのメジャーバージョンに一致するZIPをダウンロードしてください。
+このリポジトリの [Releases](https://github.com/pgextwin/pg_bigm/releases) から、使用しているPostgreSQLのメジャーバージョンに一致するZIPをダウンロードしてください。
 
 ファイル名は次の形式です。
 

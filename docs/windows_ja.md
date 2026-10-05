@@ -23,7 +23,7 @@ pg_bigm（ピージーバイグラム）は、PostgreSQL上で全文検索機能
 
 ## ダウンロード
 
-[GitHub Releases](https://github.com/ShutenOishi/pg_bigm/releases) から対象ZIPをダウンロードします。
+[GitHub Releases](https://github.com/pgextwin/pg_bigm/releases) から対象ZIPをダウンロードします。
 
 例:
 
