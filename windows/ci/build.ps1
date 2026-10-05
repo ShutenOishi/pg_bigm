@@ -4,25 +4,80 @@ param(
     [string]$PgRoot,
 
     [Parameter(Mandatory = $true)]
-    [string]$UpstreamDir,
-
-    [string]$BuildDir = "build"
+    [string]$UpstreamDir
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-cmake -S . -B $BuildDir -A x64 "-DPGROOT=$PgRoot" "-DUPSTREAM_DIR=$UpstreamDir"
-if ($LASTEXITCODE -ne 0) {
-    throw "CMake configure failed."
+$programFilesX86 = [Environment]::GetFolderPath("ProgramFilesX86")
+$vswhere = Join-Path $programFilesX86 "Microsoft Visual Studio\Installer\vswhere.exe"
+if (-not (Test-Path $vswhere)) {
+    throw "vswhere.exe was not found: $vswhere"
 }
 
-cmake --build $BuildDir --config Release
-if ($LASTEXITCODE -ne 0) {
-    throw "CMake build failed."
+$vsRoot = (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1).Trim()
+if ([string]::IsNullOrWhiteSpace($vsRoot)) {
+    throw "Visual Studio with the C++ x64 toolchain was not found."
 }
 
-$dll = Join-Path $BuildDir "Release\pg_bigm.dll"
+$vsDevCmd = Join-Path $vsRoot "Common7\Tools\VsDevCmd.bat"
+if (-not (Test-Path $vsDevCmd)) {
+    throw "VsDevCmd.bat was not found: $vsDevCmd"
+}
+
+$pgConfig = Join-Path $PgRoot "bin\pg_config.exe"
+$pgVersionText = (& $pgConfig --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $pgVersionText -notmatch 'PostgreSQL\s+(\d+)') {
+    throw "Could not determine PostgreSQL major version from pg_config: '$pgVersionText'"
+}
+
+$pgMajor = [int]$Matches[1]
+if ($pgMajor -notin @(15, 16)) {
+    throw "This raw compatibility probe supports PostgreSQL 15 and 16 only."
+}
+
+$source = Get-Content (Join-Path $UpstreamDir "pg_hint_plan.c") -Raw
+$exports = @("_PG_init")
+if ($source -match '(?ms)\bvoid\s+_PG_fini\s*\(\s*void\s*\)\s*\{') {
+    $exports += "_PG_fini"
+}
+
+$defPath = Join-Path $UpstreamDir "pg_hint_plan.pgextwin.def"
+(@("LIBRARY pg_hint_plan", "EXPORTS") + @($exports | Sort-Object -Unique | ForEach-Object { "    $_" })) |
+    Set-Content -Path $defPath -Encoding ascii
+
+$tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
+$cmdFile = Join-Path $tempRoot "pg_hint_plan-build.cmd"
+
+@"
+@echo off
+call "$vsDevCmd" -arch=x64 -host_arch=x64
+if errorlevel 1 exit /b %errorlevel%
+cd /d "$UpstreamDir"
+
+cl /nologo /O2 /MD /DWIN32 /DWIN32_NO_STATUS /D_CRT_SECURE_NO_WARNINGS ^
+  /I"$PgRoot\include\server\port\win32_msvc" ^
+  /I"$PgRoot\include\server\port\win32" ^
+  /I"$PgRoot\include\server" ^
+  /I"$PgRoot\include" ^
+  /I"$UpstreamDir" ^
+  /c "$UpstreamDir\pg_hint_plan.c" /Fo"$UpstreamDir\pg_hint_plan.obj"
+if errorlevel 1 exit /b %errorlevel%
+
+link /nologo /DLL /OUT:"$UpstreamDir\pg_hint_plan.dll" /DEF:"$defPath" ^
+  "$UpstreamDir\pg_hint_plan.obj" ^
+  "$PgRoot\lib\postgres.lib" ^
+  "$PgRoot\lib\libintl.lib"
+if errorlevel 1 exit /b %errorlevel%
+"@ | Set-Content -Path $cmdFile -Encoding ascii
+
+& cmd.exe /d /c $cmdFile
+if ($LASTEXITCODE -ne 0) {
+    throw "pg_hint_plan raw MSVC build failed with exit code $LASTEXITCODE."
+}
+
+$dll = Join-Path $UpstreamDir "pg_hint_plan.dll"
 if (-not (Test-Path $dll)) {
-    throw "Expected pg_bigm.dll was not produced: $dll"
+    throw "Expected pg_hint_plan.dll was not produced: $dll"
 }
