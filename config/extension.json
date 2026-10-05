@@ -1,14 +1,13 @@
 {
   "schemaVersion": 1,
-  "name": "pg_bigm",
+  "name": "set_user",
   "upstream": {
-    "repository": "pgbigm/pg_bigm",
-    "ref": "v1.2-20250903",
-    "version": "1.2"
+    "repository": "pgaudit/set_user",
+    "ref": "REL4_2_0",
+    "version": "4.2.0"
   },
   "postgresql": {
-    "minMajor": 14,
-    "maxMajor": 18
+    "majors": [14, 15, 16, 17, 18]
   },
   "windows": {
     "architecture": "x64"
