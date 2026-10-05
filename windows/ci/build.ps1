@@ -36,7 +36,7 @@ $makefileName = "Makefile.win"
 
 # PostgreSQL 16 changed fmgr.h so that PG_FUNCTION_INFO_V1() exports the SQL
 # function itself on Windows and centrally marks _PG_init/_PG_fini as
-# PGDLLEXPORT. PostgreSQL 14/15 do not do that. Upstream pg_cron v1.6.8's
+# PGDLLEXPORT. PostgreSQL 14/15 do not do that. pg_cron declares _PG_fini but does not define it, so only the implemented _PG_init entrypoint is added here. Upstream pg_cron v1.6.8's
 # Makefile.win was introduced and tested on PG18, so for PG14/15 we add only
 # the missing DLL exports at link time without modifying upstream C sources.
 if ($pgMajor -lt 16) {
