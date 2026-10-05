@@ -51,7 +51,7 @@ set_target_properties(pg_bigm PROPERTIES
 if(MSVC)
     set_property(
         TARGET pg_bigm
-        PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL$<$<CONFIG:Debug>:Debug>"
+        PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
     )
     target_compile_options(pg_bigm PRIVATE /W3)
 endif()
