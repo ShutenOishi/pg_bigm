@@ -49,6 +49,10 @@ set_target_properties(pg_bigm PROPERTIES
 )
 
 if(MSVC)
+    target_sources(pg_bigm PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/windows/pg_bigm.def"
+    )
+
     set_property(
         TARGET pg_bigm
         PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
