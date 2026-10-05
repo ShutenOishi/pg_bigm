@@ -47,10 +47,10 @@ Copy-Item (Join-Path $UpstreamDir "lib\pg_repack--*.sql") (Join-Path $stage "sha
 Copy-Item (Join-Path $UpstreamDir "COPYRIGHT") (Join-Path $stage "COPYRIGHT")
 Copy-Item (Join-Path $UpstreamDir "README.rst") (Join-Path $stage "UPSTREAM-README.rst")
 
-foreach ($doc in @("pg_repack.rst", "pg_repack_jp.rst")) {
-    $source = Join-Path $UpstreamDir "doc\$doc"
+foreach ($doc in @("doc\pg_repack.rst", "doc\pg_repack_jp.rst")) {
+    $source = Join-Path $UpstreamDir $doc
     if (Test-Path $source) {
-        Copy-Item $source (Join-Path $stage "docs\$doc")
+        Copy-Item $source (Join-Path $stage "docs\$(Split-Path $source -Leaf)")
     }
 }
 
@@ -71,16 +71,10 @@ PostgreSQL major:    $PostgreSqlMajor
 PostgreSQL tested:   $PostgreSqlMinor
 Architecture:        Windows x64
 Compiler:            MSVC
-License:             see COPYRIGHT
+License:             BSD-3-Clause; see COPYRIGHT
 
 This is an unofficial pgextwin probe package built from the official pg_repack source.
-
-The package contains both components required by pg_repack:
-- bin/pg_repack.exe
-- lib/pg_repack.dll
-
-Install the extension files into the matching PostgreSQL installation and run
-CREATE EXTENSION pg_repack in each database that will be processed.
+The package contains both the pg_repack client executable and server extension DLL.
 "@ | Set-Content -Path (Join-Path $stage "PACKAGE-INFO.txt") -Encoding utf8
 
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -CompressionLevel Optimal
