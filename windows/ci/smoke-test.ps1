@@ -19,11 +19,15 @@ $pgIsReady = Join-Path $PgRoot "bin\pg_isready.exe"
 $psql = Join-Path $PgRoot "bin\psql.exe"
 
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
-$dataDir = Join-Path $tempRoot "pg_bigm-pg$PostgreSqlMajor-data"
-$logFile = Join-Path $tempRoot "pg_bigm-pg$PostgreSqlMajor.log"
+$dataDir = Join-Path $tempRoot "pgaudit-pg$PostgreSqlMajor-data"
+$logFile = Join-Path $tempRoot "pgaudit-pg$PostgreSqlMajor.log"
+$setupSql = Join-Path $tempRoot "pgaudit-setup.sql"
 
 if (Test-Path $dataDir) {
     Remove-Item $dataDir -Recurse -Force
+}
+if (Test-Path $logFile) {
+    Remove-Item $logFile -Force
 }
 
 & $initdb -D $dataDir -U postgres -A trust --encoding=UTF8 --no-locale
@@ -34,7 +38,7 @@ if ($LASTEXITCODE -ne 0) {
 function Show-PostgresLog {
     if (Test-Path $logFile) {
         Write-Host "----- PostgreSQL log -----"
-        Get-Content $logFile -Tail 200
+        Get-Content $logFile -Tail 300
         Write-Host "--------------------------"
     }
 }
@@ -45,7 +49,6 @@ function Wait-Postgres {
         if ($LASTEXITCODE -eq 0) {
             return
         }
-
         Start-Sleep -Seconds 2
     }
 
@@ -54,41 +57,63 @@ function Wait-Postgres {
 }
 
 try {
-    & $pgCtl -D $dataDir -l $logFile -o "-p $PgPort -c shared_preload_libraries=pg_bigm" start
+    $serverOptions = "-p $PgPort -c shared_preload_libraries=pgaudit"
+
+    & $pgCtl -D $dataDir -l $logFile -o $serverOptions start
     if ($LASTEXITCODE -ne 0) {
         Show-PostgresLog
-        throw "Failed to start temporary PostgreSQL cluster."
+        throw "Failed to start PostgreSQL with pgAudit preloaded."
     }
 
     Wait-Postgres
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP EXTENSION IF EXISTS pg_bigm CASCADE;"
+    @'
+CREATE EXTENSION pgaudit;
+SET pgaudit.log = 'read,write,ddl';
+SET pgaudit.log_relation = on;
+
+DROP TABLE IF EXISTS public.pgextwin_pgaudit_probe;
+CREATE TABLE public.pgextwin_pgaudit_probe (
+    id integer PRIMARY KEY,
+    payload text NOT NULL
+);
+INSERT INTO public.pgextwin_pgaudit_probe
+VALUES (1, 'pgextwin');
+SELECT payload
+FROM public.pgextwin_pgaudit_probe
+WHERE id = 1;
+'@ | Set-Content -Path $setupSql -Encoding utf8
+
+    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -f $setupSql
     if ($LASTEXITCODE -ne 0) {
-        throw "DROP EXTENSION pre-clean failed."
+        Show-PostgresLog
+        throw "pgAudit functional SQL failed."
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_bigm;"
-    if ($LASTEXITCODE -ne 0) {
-        throw "CREATE EXTENSION pg_bigm failed."
+    Start-Sleep -Seconds 1
+
+    if (-not (Test-Path $logFile)) {
+        throw "PostgreSQL log file was not created."
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS ci_bigm; CREATE TABLE ci_bigm(v text); INSERT INTO ci_bigm VALUES ('abcdef'), ('uvwxyz'); CREATE INDEX ci_bigm_idx ON ci_bigm USING gin (v gin_bigm_ops);"
-    if ($LASTEXITCODE -ne 0) {
-        throw "pg_bigm GIN index setup failed."
+    $log = Get-Content $logFile -Raw
+
+    $requiredPatterns = @(
+        'AUDIT:\s+SESSION,[^\r\n]*,DDL,CREATE TABLE,',
+        'AUDIT:\s+SESSION,[^\r\n]*,WRITE,INSERT,',
+        'AUDIT:\s+SESSION,[^\r\n]*,READ,SELECT,'
+    )
+
+    foreach ($pattern in $requiredPatterns) {
+        if ($log -notmatch $pattern) {
+            Show-PostgresLog
+            throw "Required pgAudit log pattern was not found: $pattern"
+        }
     }
 
-    $count = (
-        & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "SET enable_seqscan=off; SELECT count(*) FROM ci_bigm WHERE v LIKE likequery('bcd');"
-    ) | Select-Object -Last 1
-
-    $countText = ([string]$count).Trim()
-    if ($LASTEXITCODE -ne 0 -or $countText -ne "1") {
-        throw "pg_bigm search smoke test failed. Expected 1 row, got '$countText'."
-    }
-
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE ci_bigm; DROP EXTENSION pg_bigm;"
+    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SET pgaudit.log = 'none'; DROP TABLE public.pgextwin_pgaudit_probe; DROP EXTENSION pgaudit;"
     if ($LASTEXITCODE -ne 0) {
-        throw "Smoke-test cleanup failed."
+        throw "pgAudit smoke-test cleanup failed."
     }
 }
 catch {
