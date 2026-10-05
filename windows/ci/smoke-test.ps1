@@ -102,6 +102,26 @@ ANALYZE public.pgextwin_hint_probe;
         throw "IndexScan hint was not applied. Plan: $indexPlan"
     }
 
+    if ($PostgreSqlMajor -le 16) {
+        # PG14-16 pg_hint_plan calls PostgreSQL core JumbleQuery() and
+        # EnableQueryId() when the hint-table path is enabled. Those symbols
+        # are supplied by the exact-version PostgreSQL source object rebuilt
+        # by build.ps1, so exercise that path explicitly.
+        $hintTableProbe = (
+            & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "SET compute_query_id = on; SET pg_hint_plan.enable_hint_table = on; EXPLAIN (COSTS OFF) SELECT * FROM public.pgextwin_hint_probe WHERE id = 4242;"
+        ) -join [Environment]::NewLine
+
+        if ($LASTEXITCODE -ne 0) {
+            Show-PostgresLog
+            throw "pg_hint_plan hint-table compatibility path failed."
+        }
+
+        if ($hintTableProbe -notmatch 'Scan') {
+            Show-PostgresLog
+            throw "Hint-table compatibility path did not produce an execution plan. Output: $hintTableProbe"
+        }
+    }
+
     & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE public.pgextwin_hint_probe; DROP EXTENSION pg_hint_plan;"
     if ($LASTEXITCODE -ne 0) {
         throw "pg_hint_plan smoke-test cleanup failed."
