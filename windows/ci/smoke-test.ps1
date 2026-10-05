@@ -19,8 +19,9 @@ $pgIsReady = Join-Path $PgRoot "bin\pg_isready.exe"
 $psql = Join-Path $PgRoot "bin\psql.exe"
 
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
-$dataDir = Join-Path $tempRoot "pg_bigm-pg$PostgreSqlMajor-data"
-$logFile = Join-Path $tempRoot "pg_bigm-pg$PostgreSqlMajor.log"
+$dataDir = Join-Path $tempRoot "pg_cron-pg$PostgreSqlMajor-data"
+$logFile = Join-Path $tempRoot "pg_cron-pg$PostgreSqlMajor.log"
+$setupSql = Join-Path $tempRoot "pg_cron-setup.sql"
 
 if (Test-Path $dataDir) {
     Remove-Item $dataDir -Recurse -Force
@@ -34,7 +35,7 @@ if ($LASTEXITCODE -ne 0) {
 function Show-PostgresLog {
     if (Test-Path $logFile) {
         Write-Host "----- PostgreSQL log -----"
-        Get-Content $logFile -Tail 200
+        Get-Content $logFile -Tail 250
         Write-Host "--------------------------"
     }
 }
@@ -45,7 +46,6 @@ function Wait-Postgres {
         if ($LASTEXITCODE -eq 0) {
             return
         }
-
         Start-Sleep -Seconds 2
     }
 
@@ -54,41 +54,61 @@ function Wait-Postgres {
 }
 
 try {
-    & $pgCtl -D $dataDir -l $logFile -o "-p $PgPort -c shared_preload_libraries=pg_bigm" start
+    $serverOptions = "-p $PgPort -c shared_preload_libraries=pg_cron -c cron.database_name=postgres -c cron.use_background_workers=on -c max_worker_processes=20"
+
+    & $pgCtl -D $dataDir -l $logFile -o $serverOptions start
     if ($LASTEXITCODE -ne 0) {
         Show-PostgresLog
-        throw "Failed to start temporary PostgreSQL cluster."
+        throw "Failed to start PostgreSQL with pg_cron preloaded."
     }
 
     Wait-Postgres
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP EXTENSION IF EXISTS pg_bigm CASCADE;"
+    @'
+CREATE EXTENSION pg_cron;
+DROP TABLE IF EXISTS public.pgextwin_cron_probe;
+CREATE TABLE public.pgextwin_cron_probe (
+    id integer PRIMARY KEY,
+    executed_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+SELECT cron.schedule(
+    'pgextwin-ci',
+    '1 second',
+    'INSERT INTO public.pgextwin_cron_probe(id) VALUES (1) ON CONFLICT (id) DO NOTHING'
+);
+'@ | Set-Content -Path $setupSql -Encoding utf8
+
+    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -f $setupSql
     if ($LASTEXITCODE -ne 0) {
-        throw "DROP EXTENSION pre-clean failed."
+        throw "CREATE EXTENSION or cron.schedule setup failed."
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_bigm;"
-    if ($LASTEXITCODE -ne 0) {
-        throw "CREATE EXTENSION pg_bigm failed."
+    $executed = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        $count = (
+            & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "SELECT count(*) FROM public.pgextwin_cron_probe;"
+        ) | Select-Object -Last 1
+
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to query the pg_cron probe table."
+        }
+
+        if (([string]$count).Trim() -eq "1") {
+            $executed = $true
+            break
+        }
+
+        Start-Sleep -Seconds 2
     }
 
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS ci_bigm; CREATE TABLE ci_bigm(v text); INSERT INTO ci_bigm VALUES ('abcdef'), ('uvwxyz'); CREATE INDEX ci_bigm_idx ON ci_bigm USING gin (v gin_bigm_ops);"
-    if ($LASTEXITCODE -ne 0) {
-        throw "pg_bigm GIN index setup failed."
+    if (-not $executed) {
+        Show-PostgresLog
+        throw "pg_cron scheduled job did not execute within the expected window."
     }
 
-    $count = (
-        & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -Atqc "SET enable_seqscan=off; SELECT count(*) FROM ci_bigm WHERE v LIKE likequery('bcd');"
-    ) | Select-Object -Last 1
-
-    $countText = ([string]$count).Trim()
-    if ($LASTEXITCODE -ne 0 -or $countText -ne "1") {
-        throw "pg_bigm search smoke test failed. Expected 1 row, got '$countText'."
-    }
-
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE ci_bigm; DROP EXTENSION pg_bigm;"
+    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "SELECT cron.unschedule('pgextwin-ci'); DROP TABLE public.pgextwin_cron_probe; DROP EXTENSION pg_cron;"
     if ($LASTEXITCODE -ne 0) {
-        throw "Smoke-test cleanup failed."
+        throw "pg_cron smoke-test cleanup failed."
     }
 }
 catch {
