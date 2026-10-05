@@ -297,11 +297,37 @@ jobs:
           tag="${GITHUB_REF_NAME#release/}"
 
           cat > release-notes.md <<EOF
-          Unofficial Windows x64 binaries of pg_bigm built from upstream ${{ needs.matrix.outputs.upstream_repository }} at ${{ needs.matrix.outputs.upstream_ref }}.
+          # pg_bigm Windows x64 バイナリ
 
-          Every ZIP was compiled and smoke-tested on GitHub Actions against the PostgreSQL major version in its filename. The build matrix includes only PostgreSQL versions whose configured community EOL date has not passed.
+          ## 日本語
 
-          Upstream pg_bigm documentation and license remain authoritative.
+          [pg_bigm](https://github.com/pgbigm/pg_bigm) の **非公式 Windows x64 バイナリ**です。
+          公式ソース \`${{ needs.matrix.outputs.upstream_repository }}\` の \`${{ needs.matrix.outputs.upstream_ref }}\` を使用してビルドしています。
+
+          各ZIPは、ファイル名に記載されたPostgreSQLメジャーバージョンに対してGitHub Actions上でコンパイルし、\`CREATE EXTENSION pg_bigm\` とGINインデックスを使った基本検索のスモークテストを実施しています。ビルド対象は、設定済みのコミュニティEOL日を過ぎていないPostgreSQLだけです。
+
+          ### ドキュメント
+
+          - [日本語README](https://github.com/$GITHUB_REPOSITORY/blob/main/README_ja.md)
+          - [Windows x64 バイナリ利用ガイド（日本語）](https://github.com/$GITHUB_REPOSITORY/blob/main/docs/windows_ja.md)
+          - [pg_bigm 1.2 公式ドキュメント（日本語）](https://github.com/pgbigm/pg_bigm/blob/REL1_2_STABLE/docs/pg_bigm.md)
+          - [pg_bigm 1.2 Official Documentation (English)](https://github.com/pgbigm/pg_bigm/blob/REL1_2_STABLE/docs/pg_bigm_en.md)
+
+          pg_bigm本体の機能仕様、SQL API、設定、制限事項、およびライセンスについては公式pg_bigmのドキュメントとライセンスを正規の情報源としてください。
+
+          ### ファイル検証
+
+          Releaseに添付した \`SHA256SUMS.txt\` で各ZIPのSHA-256を確認できます。
+
+          ---
+
+          ## English
+
+          These are **unofficial Windows x64 binaries** of pg_bigm, built from upstream \`${{ needs.matrix.outputs.upstream_repository }}\` at \`${{ needs.matrix.outputs.upstream_ref }}\`.
+
+          Every ZIP is compiled and smoke-tested on GitHub Actions against the PostgreSQL major version in its filename, including \`CREATE EXTENSION pg_bigm\` and a basic GIN-index search. The build matrix includes only PostgreSQL versions whose configured community EOL date has not passed.
+
+          For pg_bigm behavior, SQL APIs, configuration, limitations, and licensing, the upstream pg_bigm documentation and license remain authoritative.
           EOF
 
           echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
@@ -313,4 +339,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          gh release create "$RELEASE_TAG"             dist/*.zip             dist/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "$RELEASE_TAG"             --notes-file release-notes.md
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Updating existing Release notes: $RELEASE_TAG"
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md
+          else
+            echo "Creating Release: $RELEASE_TAG"
+            gh release create "$RELEASE_TAG" \
+              dist/*.zip \
+              dist/SHA256SUMS.txt \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md
+          fi
