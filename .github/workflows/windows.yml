@@ -116,32 +116,19 @@ jobs:
       - name: Configure and build pg_bigm
         shell: pwsh
         run: |
-          & ".\windows\ci\build.ps1" \
-            -PgRoot $env:PGROOT \
-            -UpstreamDir (Join-Path $PWD "upstream")
+          & ".\windows\ci\build.ps1" -PgRoot $env:PGROOT -UpstreamDir (Join-Path $PWD "upstream")
       - name: Install extension into test PostgreSQL
         shell: pwsh
         run: |
-          & ".\windows\ci\install.ps1" \
-            -PgRoot $env:PGROOT \
-            -UpstreamDir (Join-Path $PWD "upstream")
+          & ".\windows\ci\install.ps1" -PgRoot $env:PGROOT -UpstreamDir (Join-Path $PWD "upstream")
       - name: Smoke test
         shell: pwsh
         run: |
-          & ".\windows\ci\smoke-test.ps1" \
-            -PgRoot $env:PGROOT \
-            -PgPort ([int]$env:PGPORT) \
-            -PostgreSqlMajor ([int]"${{ matrix.major }}")
+          & ".\windows\ci\smoke-test.ps1" -PgRoot $env:PGROOT -PgPort ([int]$env:PGPORT) -PostgreSqlMajor ([int]"${{ matrix.major }}")
       - name: Package
         shell: pwsh
         run: |
-          & ".\windows\ci\package.ps1" \
-            -UpstreamDir (Join-Path $PWD "upstream") \
-            -UpstreamRepository "${{ needs.matrix.outputs.upstream_repository }}" \
-            -UpstreamRef "${{ needs.matrix.outputs.upstream_ref }}" \
-            -UpstreamVersion "${{ needs.matrix.outputs.upstream_version }}" \
-            -PostgreSqlMajor ([int]"${{ matrix.major }}") \
-            -PostgreSqlMinor "${{ matrix.minor }}"
+          & ".\windows\ci\package.ps1" -UpstreamDir (Join-Path $PWD "upstream") -UpstreamRepository "${{ needs.matrix.outputs.upstream_repository }}" -UpstreamRef "${{ needs.matrix.outputs.upstream_ref }}" -UpstreamVersion "${{ needs.matrix.outputs.upstream_version }}" -PostgreSqlMajor ([int]"${{ matrix.major }}") -PostgreSqlMinor "${{ matrix.minor }}"
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
