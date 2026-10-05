@@ -40,7 +40,7 @@ $makefileName = "Makefile.win"
 # Makefile.win was introduced and tested on PG18, so for PG14/15 we add only
 # the missing DLL exports at link time without modifying upstream C sources.
 if ($pgMajor -lt 16) {
-    $exports = @("_PG_init", "_PG_fini")
+    $exports = @("_PG_init")
 
     Get-ChildItem (Join-Path $UpstreamDir "src") -Filter "*.c" | ForEach-Object {
         $source = Get-Content $_.FullName -Raw
