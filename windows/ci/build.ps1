@@ -25,6 +25,54 @@ if (-not (Test-Path $vsDevCmd)) {
     throw "VsDevCmd.bat was not found: $vsDevCmd"
 }
 
+$pgConfig = Join-Path $PgRoot "bin\pg_config.exe"
+$pgVersionText = (& $pgConfig --version).Trim()
+if ($LASTEXITCODE -ne 0 -or $pgVersionText -notmatch 'PostgreSQL\s+(\d+)') {
+    throw "Could not determine PostgreSQL major version from pg_config: '$pgVersionText'"
+}
+
+$pgMajor = [int]$Matches[1]
+$makefileName = "Makefile.win"
+
+# PostgreSQL 16 changed fmgr.h so that PG_FUNCTION_INFO_V1() exports the SQL
+# function itself on Windows and centrally marks _PG_init/_PG_fini as
+# PGDLLEXPORT. PostgreSQL 14/15 do not do that. Upstream pg_cron v1.6.8's
+# Makefile.win was introduced and tested on PG18, so for PG14/15 we add only
+# the missing DLL exports at link time without modifying upstream C sources.
+if ($pgMajor -lt 16) {
+    $exports = @("_PG_init", "_PG_fini")
+
+    Get-ChildItem (Join-Path $UpstreamDir "src") -Filter "*.c" | ForEach-Object {
+        $source = Get-Content $_.FullName -Raw
+        foreach ($match in [regex]::Matches($source, 'PG_FUNCTION_INFO_V1\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)')) {
+            $exports += $match.Groups[1].Value
+        }
+    }
+
+    $exports = @($exports | Sort-Object -Unique)
+    $defPath = Join-Path $UpstreamDir "pg_cron.pgextwin.def"
+    $defLines = @("LIBRARY pg_cron", "EXPORTS") + @($exports | ForEach-Object { "    $_" })
+    $defLines | Set-Content -Path $defPath -Encoding ascii
+
+    $upstreamMakefile = Join-Path $UpstreamDir "Makefile.win"
+    $compatMakefile = Join-Path $UpstreamDir "Makefile.pgextwin.win"
+    $makefileText = Get-Content $upstreamMakefile -Raw
+    $linkLine = '$(CC) $(CFLAGS) $(OBJS) $(LIBS) /link /DLL /OUT:$(SHLIB)'
+    $compatLinkLine = '$(CC) $(CFLAGS) $(OBJS) $(LIBS) /link /DLL /DEF:pg_cron.pgextwin.def /OUT:$(SHLIB)'
+
+    if (-not $makefileText.Contains($linkLine)) {
+        throw "Expected upstream Makefile.win link command was not found; review the pg_cron Windows build before continuing."
+    }
+
+    $makefileText.Replace($linkLine, $compatLinkLine) | Set-Content -Path $compatMakefile -Encoding ascii
+    $makefileName = "Makefile.pgextwin.win"
+
+    Write-Host "PostgreSQL $pgMajor detected. Added compatibility exports: $($exports -join ', ')"
+}
+else {
+    Write-Host "PostgreSQL $pgMajor detected. Using upstream Makefile.win unchanged."
+}
+
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $cmdFile = Join-Path $tempRoot "pg_cron-build.cmd"
 
@@ -34,7 +82,7 @@ call "$vsDevCmd" -arch=x64 -host_arch=x64
 if errorlevel 1 exit /b %errorlevel%
 set "PGROOT=$PgRoot"
 cd /d "$UpstreamDir"
-nmake /F Makefile.win all
+nmake /F "$makefileName" all
 "@ | Set-Content -Path $cmdFile -Encoding ascii
 
 & cmd.exe /d /c $cmdFile
