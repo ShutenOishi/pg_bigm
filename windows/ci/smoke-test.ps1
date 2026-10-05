@@ -21,13 +21,13 @@ $psql = Join-Path $PgRoot "bin\psql.exe"
 $tempRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $dataDir = Join-Path $tempRoot "set_user-pg$PostgreSqlMajor-data"
 $logFile = Join-Path $tempRoot "set_user-pg$PostgreSqlMajor.log"
-$scriptFile = Join-Path $tempRoot "set_user-probe.sql"
+$testSql = Join-Path $tempRoot "set_user-pg$PostgreSqlMajor-test.sql"
+$outputFile = Join-Path $tempRoot "set_user-pg$PostgreSqlMajor-output.txt"
 
-if (Test-Path $dataDir) {
-    Remove-Item $dataDir -Recurse -Force
-}
-if (Test-Path $logFile) {
-    Remove-Item $logFile -Force
+foreach ($path in @($dataDir, $logFile, $testSql, $outputFile)) {
+    if (Test-Path $path) {
+        Remove-Item $path -Recurse -Force
+    }
 }
 
 & $initdb -D $dataDir -U postgres -A trust --encoding=UTF8 --no-locale
@@ -68,49 +68,58 @@ try {
     Wait-Postgres
 
     @'
+\set ON_ERROR_STOP on
 CREATE EXTENSION set_user;
-CREATE ROLE pgextwin_set_user_target;
-SELECT set_user('pgextwin_set_user_target');
-SELECT 'after_set=' || current_user;
+CREATE ROLE pgextwin_setuser_target NOLOGIN;
+SELECT set_user('pgextwin_setuser_target');
+SELECT CASE
+         WHEN current_user = 'pgextwin_setuser_target'
+          AND session_user = 'postgres'
+         THEN 'PGEXTWIN_TARGET_OK'
+         ELSE 'PGEXTWIN_TARGET_BAD:' || current_user || ':' || session_user
+       END;
 SELECT reset_user();
-SELECT 'after_reset=' || current_user;
-'@ | Set-Content -Path $scriptFile -Encoding utf8
+SELECT CASE
+         WHEN current_user = 'postgres'
+          AND session_user = 'postgres'
+         THEN 'PGEXTWIN_RESET_OK'
+         ELSE 'PGEXTWIN_RESET_BAD:' || current_user || ':' || session_user
+       END;
+DROP ROLE pgextwin_setuser_target;
+DROP EXTENSION set_user;
+'@ | Set-Content -Path $testSql -Encoding utf8
 
-    $output = (
-        & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -X -A -t -v ON_ERROR_STOP=1 -f $scriptFile
-    ) -join [Environment]::NewLine
+    $output = (& $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -At -f $testSql 2>&1)
+    $exitCode = $LASTEXITCODE
+    $output | Set-Content -Path $outputFile -Encoding utf8
+    $outputText = $output -join [Environment]::NewLine
 
-    if ($LASTEXITCODE -ne 0) {
+    if ($exitCode -ne 0) {
         Show-PostgresLog
-        throw "set_user functional SQL failed."
+        throw "set_user functional SQL failed. Output: $outputText"
     }
 
-    if ($output -notmatch 'after_set=pgextwin_set_user_target') {
+    if ($outputText -notmatch 'PGEXTWIN_TARGET_OK') {
         Show-PostgresLog
-        throw "set_user did not switch current_user as expected. Output: $output"
+        throw "set_user did not transition current_user to the target role. Output: $outputText"
     }
 
-    if ($output -notmatch 'after_reset=postgres') {
+    if ($outputText -notmatch 'PGEXTWIN_RESET_OK') {
         Show-PostgresLog
-        throw "reset_user did not restore current_user as expected. Output: $output"
+        throw "reset_user did not restore the original user. Output: $outputText"
     }
 
     Start-Sleep -Seconds 1
+
     $log = Get-Content $logFile -Raw
-
-    if ($log -notmatch 'Role postgres transitioning to Role pgextwin_set_user_target') {
+    if ($log -notmatch 'Superuser Role postgres transitioning to Role pgextwin_setuser_target') {
         Show-PostgresLog
-        throw "set_user transition was not logged."
+        throw "Expected set_user transition log entry was not found."
     }
 
-    if ($log -notmatch 'Role pgextwin_set_user_target transitioning to Role postgres') {
+    if ($log -notmatch 'Role pgextwin_setuser_target transitioning to Superuser Role postgres') {
         Show-PostgresLog
-        throw "reset_user transition was not logged."
-    }
-
-    & $psql -h 127.0.0.1 -p $PgPort -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP EXTENSION set_user; DROP ROLE pgextwin_set_user_target;"
-    if ($LASTEXITCODE -ne 0) {
-        throw "set_user smoke-test cleanup failed."
+        throw "Expected reset_user transition log entry was not found."
     }
 }
 catch {
