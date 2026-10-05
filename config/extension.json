@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "name": "pg_bigm",
+  "name": "pg_cron",
   "upstream": {
-    "repository": "pgbigm/pg_bigm",
-    "ref": "v1.2-20250903",
-    "version": "1.2"
+    "repository": "citusdata/pg_cron",
+    "ref": "v1.6.8",
+    "version": "1.6.8"
   },
   "postgresql": {
     "minMajor": 14,
