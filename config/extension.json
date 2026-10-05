@@ -7,7 +7,7 @@
     "version": "1.5.3"
   },
   "postgresql": {
-    "majors": [14, 15, 16, 17, 18]
+    "majors": [17, 18]
   },
   "windows": {
     "architecture": "x64"
