@@ -60,7 +60,7 @@ $pgutText = Get-Content $pgutSource -Raw
 
 foreach ($functionName in @("on_before_exec", "on_after_exec")) {
     $functionMarker = "$functionName(pgutConn *conn)"
-    $functionStart = $pgutText.IndexOf($functionMarker, [StringComparison]::Ordinal)
+    $functionStart = $pgutText.LastIndexOf($functionMarker, [StringComparison]::Ordinal)
     if ($functionStart -lt 0) {
         throw "Expected function '$functionName' was not found in pgut.c."
     }
