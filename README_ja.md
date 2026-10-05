@@ -47,7 +47,7 @@ Windowsバイナリは、ビルド日時点でPostgreSQLコミュニティのメ
 | 17 | 17.11 | 2029-11-08 |
 | 18 | 18.6 | 2030-11-14 |
 
-PostgreSQL 14は現時点では対象ですが、設定済みEOL日を過ぎるとCIのビルド対象から自動的に除外されます。バージョン情報は [config/postgresql.json](config/postgresql.json) で管理しています。
+PostgreSQL 14は現時点では対象ですが、設定済みEOL日を過ぎると共通pgextwin workflowのビルド対象から自動的に除外されます。PostgreSQLのライフサイクル情報は **pgextwin/build** で一元管理し、このリポジトリでは [config/extension.json](config/extension.json) にpg_bigmの対応範囲を定義します。
 
 配布対象アーキテクチャは **Windows x64のみ**です。
 
@@ -108,15 +108,17 @@ pg_bigmはデータベース単位で拡張として登録されます。イン�
 
 ## CI/CD
 
-[.github/workflows/windows.yml](.github/workflows/windows.yml) では、メンテナンス対象の各PostgreSQLメジャーバージョンについて次を実施します。
+[.github/workflows/windows.yml](.github/workflows/windows.yml) は、共通CI/CD処理を **pgextwin/build** のReusable Workflowへ委譲します。
 
-1. [config/postgresql.json](config/postgresql.json) から対応バージョン行列を読み込みます。
+対象となる各PostgreSQLメジャーバージョンについて、共通workflowは次を実施します。
+
+1. **pgextwin/build** のPostgreSQLライフサイクル情報と [config/extension.json](config/extension.json) を組み合わせて対象行列を決定します。
 2. EOL日を過ぎたPostgreSQLを除外します。
 3. 固定した公式pg_bigmソースをチェックアウトします。
 4. 対象PostgreSQLのWindows x64環境を導入します。
-5. MSVCとCMakeで `pg_bigm.dll` をビルドします。
-6. テスト用PostgreSQLへ拡張を配置します。
-7. pg_bigmをプリロードした一時クラスタを起動します。
+5. このリポジトリの **windows/ci/** 配下にあるExtension固有hookを呼び出します。
+6. MSVCとCMakeで `pg_bigm.dll` をビルドします。
+7. テスト用PostgreSQLへ拡張を配置します。
 8. `CREATE EXTENSION pg_bigm` とGINインデックスを使った基本検索のスモークテストを行います。
 9. PostgreSQLメジャーバージョンごとのZIPをGitHub Actions artifactとして作成します。
 
@@ -138,17 +140,15 @@ release/v1.2-20250903-windows.1
 
 ## PostgreSQL対応バージョンの更新
 
-PostgreSQLの新しいマイナーリリースが公開された場合や、メジャーバージョンがEOLを迎えた場合は [config/postgresql.json](config/postgresql.json) を更新します。
+PostgreSQLのマイナーバージョン、Windowsパッケージ、EOL情報は **pgextwin/build** で一元管理します。
 
-`eol` がCIでの自動判定に使われ、EOLを過ぎたメジャーバージョンはビルドされません。
-
-新しいPostgreSQLメジャーバージョンを追加する場合は、pg_bigm公式側の対応状況を確認したうえで、CIによるビルドとスモークテストを通してからRelease対象にします。
+このリポジトリでは [config/extension.json](config/extension.json) にpg_bigmが許可するPostgreSQLメジャーバージョン範囲だけを定義します。pg_bigm公式側の対応状況が変わった場合はmanifestを更新し、共通CIによる全対象バージョンのビルドとスモークテストを通してからRelease対象にします。
 
 ## pg_bigmの更新
 
 pg_bigm公式から新しいリリースが公開された場合は、次を更新します。
 
-1. [config/postgresql.json](config/postgresql.json) の `upstream.ref` と `upstream.version`。
+1. [config/extension.json](config/extension.json) の `upstream.ref` と `upstream.version`。
 2. README内の公式バージョン表記とドキュメントリンク。
 3. 必要に応じてWindows向け補足ドキュメント。
 4. メンテナンス対象PostgreSQL全バージョンでCIを実行します。
