@@ -1,14 +1,18 @@
 {
   "schemaVersion": 1,
-  "name": "pg_bigm",
+  "name": "pgaudit",
   "upstream": {
-    "repository": "pgbigm/pg_bigm",
-    "ref": "v1.2-20250903",
-    "version": "1.2"
+    "repository": "pgaudit/pgaudit",
+    "perPostgresql": {
+      "14": { "ref": "1.6.3", "version": "1.6.3" },
+      "15": { "ref": "1.7.1", "version": "1.7.1" },
+      "16": { "ref": "16.1", "version": "16.1" },
+      "17": { "ref": "17.1", "version": "17.1" },
+      "18": { "ref": "18.0", "version": "18.0" }
+    }
   },
   "postgresql": {
-    "minMajor": 14,
-    "maxMajor": 18
+    "majors": [14, 15, 16, 17, 18]
   },
   "windows": {
     "architecture": "x64"
