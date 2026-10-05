@@ -18,15 +18,13 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$PostgreSqlMinor,
 
-    [string]$BuildDir = "build",
-
     [string]$DistDir = "dist"
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$assetName = "pg_bigm-$UpstreamRef-pg$PostgreSqlMajor-windows-x64"
+$assetName = "set_user-$UpstreamRef-pg$PostgreSqlMajor-windows-x64"
 $stage = Join-Path $DistDir $assetName
 $zipPath = Join-Path $DistDir "$assetName.zip"
 
@@ -39,23 +37,16 @@ if (Test-Path $zipPath) {
 
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "lib") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $stage "share\extension") | Out-Null
-New-Item -ItemType Directory -Force -Path (Join-Path $stage "docs") | Out-Null
+New-Item -ItemType Directory -Force -Path (Join-Path $stage "include") | Out-Null
 
-Copy-Item (Join-Path $BuildDir "Release\pg_bigm.dll") (Join-Path $stage "lib\pg_bigm.dll")
-Copy-Item (Join-Path $UpstreamDir "pg_bigm.control") (Join-Path $stage "share\extension\pg_bigm.control")
-Copy-Item (Join-Path $UpstreamDir "pg_bigm--*.sql") (Join-Path $stage "share\extension\")
+Copy-Item (Join-Path $UpstreamDir "set_user.dll") (Join-Path $stage "lib\set_user.dll")
+Copy-Item (Join-Path $UpstreamDir "set_user.control") (Join-Path $stage "share\extension\set_user.control")
+Copy-Item (Join-Path $UpstreamDir "extension\set_user--*.sql") (Join-Path $stage "share\extension\")
+Copy-Item (Join-Path $UpstreamDir "updates\set_user--*.sql") (Join-Path $stage "share\extension\")
+Copy-Item (Join-Path $UpstreamDir "src\set_user.h") (Join-Path $stage "include\set_user.h")
 Copy-Item (Join-Path $UpstreamDir "LICENSE") (Join-Path $stage "LICENSE")
 Copy-Item (Join-Path $UpstreamDir "README.md") (Join-Path $stage "UPSTREAM-README.md")
-
-$japaneseDoc = Join-Path $UpstreamDir "docs\pg_bigm.md"
-$englishDoc = Join-Path $UpstreamDir "docs\pg_bigm_en.md"
-
-if (Test-Path $japaneseDoc) {
-    Copy-Item $japaneseDoc (Join-Path $stage "docs\pg_bigm.md")
-}
-if (Test-Path $englishDoc) {
-    Copy-Item $englishDoc (Join-Path $stage "docs\pg_bigm_en.md")
-}
+Copy-Item (Join-Path $UpstreamDir "CHANGELOG.md") (Join-Path $stage "UPSTREAM-CHANGELOG.md")
 
 $upstreamSha = (& git -C $UpstreamDir rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstreamSha)) {
@@ -63,21 +54,22 @@ if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstreamSha)) {
 }
 
 @"
-pg_bigm Windows binary package
-=================================
+set_user Windows binary package
+===============================
 
 Upstream repository: $UpstreamRepository
 Upstream ref:        $UpstreamRef
 Upstream commit:     $upstreamSha
-pg_bigm version:     $UpstreamVersion
+set_user version:    $UpstreamVersion
 PostgreSQL major:    $PostgreSqlMajor
 PostgreSQL tested:   $PostgreSqlMinor
 Architecture:        Windows x64
-Compiler:            MSVC (GitHub-hosted windows-latest)
-License:             PostgreSQL License; see LICENSE
+Compiler:            MSVC
+License:             PostgreSQL license; see LICENSE
 
-This is an unofficial Windows binary package.
-The pg_bigm upstream documentation is authoritative.
+This is an unofficial pgextwin probe package built from official set_user source.
+The Windows build applies a minimal source compatibility change to the set_user
+function prototype so its linkage matches PostgreSQL's PGDLLEXPORT declaration.
 "@ | Set-Content -Path (Join-Path $stage "PACKAGE-INFO.txt") -Encoding utf8
 
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -CompressionLevel Optimal
@@ -85,5 +77,3 @@ Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -Compres
 if (-not (Test-Path $zipPath)) {
     throw "Expected package was not produced: $zipPath"
 }
-
-Write-Host "Created package: $zipPath"
