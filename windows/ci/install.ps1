@@ -4,27 +4,22 @@ param(
     [string]$PgRoot,
 
     [Parameter(Mandatory = $true)]
-    [string]$UpstreamDir,
-
-    [string]$BuildDir = "build"
+    [string]$UpstreamDir
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$dll = Join-Path $BuildDir "Release\pg_bigm.dll"
-$control = Join-Path $UpstreamDir "pg_bigm.control"
-$sqlPattern = Join-Path $UpstreamDir "pg_bigm--*.sql"
+$dll = Join-Path $UpstreamDir "pg_hint_plan.dll"
+$control = Join-Path $UpstreamDir "pg_hint_plan.control"
 $extensionDir = Join-Path $PgRoot "share\extension"
 
-if (-not (Test-Path $dll)) {
-    throw "Built DLL was not found: $dll"
+foreach ($path in @($dll, $control)) {
+    if (-not (Test-Path $path)) {
+        throw "Required pg_hint_plan file was not found: $path"
+    }
 }
 
-if (-not (Test-Path $control)) {
-    throw "Extension control file was not found: $control"
-}
-
-Copy-Item $dll (Join-Path $PgRoot "lib\pg_bigm.dll") -Force
-Copy-Item $control (Join-Path $extensionDir "pg_bigm.control") -Force
-Copy-Item $sqlPattern $extensionDir -Force
+Copy-Item $dll (Join-Path $PgRoot "lib\pg_hint_plan.dll") -Force
+Copy-Item $control (Join-Path $extensionDir "pg_hint_plan.control") -Force
+Copy-Item (Join-Path $UpstreamDir "pg_hint_plan--*.sql") $extensionDir -Force
