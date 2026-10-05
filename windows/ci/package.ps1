@@ -42,11 +42,13 @@ New-Item -ItemType Directory -Force -Path (Join-Path $stage "include") | Out-Nul
 Copy-Item (Join-Path $UpstreamDir "set_user.dll") (Join-Path $stage "lib\set_user.dll")
 Copy-Item (Join-Path $UpstreamDir "set_user.control") (Join-Path $stage "share\extension\set_user.control")
 Copy-Item (Join-Path $UpstreamDir "extension\set_user--*.sql") (Join-Path $stage "share\extension\")
-Copy-Item (Join-Path $UpstreamDir "updates\set_user--*.sql") (Join-Path $stage "share\extension\")
+Copy-Item (Join-Path $UpstreamDir "updates\*.sql") (Join-Path $stage "share\extension\") -ErrorAction SilentlyContinue
 Copy-Item (Join-Path $UpstreamDir "src\set_user.h") (Join-Path $stage "include\set_user.h")
 Copy-Item (Join-Path $UpstreamDir "LICENSE") (Join-Path $stage "LICENSE")
 Copy-Item (Join-Path $UpstreamDir "README.md") (Join-Path $stage "UPSTREAM-README.md")
-Copy-Item (Join-Path $UpstreamDir "CHANGELOG.md") (Join-Path $stage "UPSTREAM-CHANGELOG.md")
+if (Test-Path (Join-Path $UpstreamDir "CHANGELOG.md")) {
+    Copy-Item (Join-Path $UpstreamDir "CHANGELOG.md") (Join-Path $stage "UPSTREAM-CHANGELOG.md")
+}
 
 $upstreamSha = (& git -C $UpstreamDir rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($upstreamSha)) {
@@ -65,11 +67,11 @@ PostgreSQL major:    $PostgreSqlMajor
 PostgreSQL tested:   $PostgreSqlMinor
 Architecture:        Windows x64
 Compiler:            MSVC
-License:             PostgreSQL license; see LICENSE
+License:             PostgreSQL License; see LICENSE
 
-This is an unofficial pgextwin probe package built from official set_user source.
-The Windows build applies a minimal source compatibility change to the set_user
-function prototype so its linkage matches PostgreSQL's PGDLLEXPORT declaration.
+This is an unofficial pgextwin probe package built from the official set_user source.
+The package also includes include/set_user.h because upstream install exposes this header
+for extensions that register set_user post-execution hooks.
 "@ | Set-Content -Path (Join-Path $stage "PACKAGE-INFO.txt") -Encoding utf8
 
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -CompressionLevel Optimal
@@ -77,3 +79,5 @@ Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zipPath -Compres
 if (-not (Test-Path $zipPath)) {
     throw "Expected package was not produced: $zipPath"
 }
+
+Write-Host "Created package: $zipPath"
