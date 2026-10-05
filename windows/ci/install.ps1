@@ -4,27 +4,28 @@ param(
     [string]$PgRoot,
 
     [Parameter(Mandatory = $true)]
-    [string]$UpstreamDir,
-
-    [string]$BuildDir = "build"
+    [string]$UpstreamDir
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$dll = Join-Path $BuildDir "Release\pg_bigm.dll"
-$control = Join-Path $UpstreamDir "pg_bigm.control"
-$sqlPattern = Join-Path $UpstreamDir "pg_bigm--*.sql"
+$meta = Get-Content (Join-Path $UpstreamDir "META.json") -Raw | ConvertFrom-Json
+$repackVersion = [string]$meta.version
+
+$dll = Join-Path $UpstreamDir "pg_repack.dll"
+$exe = Join-Path $UpstreamDir "pg_repack.exe"
+$control = Join-Path $UpstreamDir "lib\pg_repack.control"
+$sql = Join-Path $UpstreamDir "lib\pg_repack--$repackVersion.sql"
 $extensionDir = Join-Path $PgRoot "share\extension"
 
-if (-not (Test-Path $dll)) {
-    throw "Built DLL was not found: $dll"
+foreach ($path in @($dll, $exe, $control, $sql)) {
+    if (-not (Test-Path $path)) {
+        throw "Required pg_repack file was not found: $path"
+    }
 }
 
-if (-not (Test-Path $control)) {
-    throw "Extension control file was not found: $control"
-}
-
-Copy-Item $dll (Join-Path $PgRoot "lib\pg_bigm.dll") -Force
-Copy-Item $control (Join-Path $extensionDir "pg_bigm.control") -Force
-Copy-Item $sqlPattern $extensionDir -Force
+Copy-Item $dll (Join-Path $PgRoot "lib\pg_repack.dll") -Force
+Copy-Item $exe (Join-Path $PgRoot "bin\pg_repack.exe") -Force
+Copy-Item $control (Join-Path $extensionDir "pg_repack.control") -Force
+Copy-Item $sql (Join-Path $extensionDir "pg_repack--$repackVersion.sql") -Force
