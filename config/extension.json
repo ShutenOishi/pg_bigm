@@ -7,10 +7,8 @@
     "version": "1.6.8"
   },
   "postgresql": {
-    "majors": [
-      14,
-      15
-    ]
+    "minMajor": 14,
+    "maxMajor": 18
   },
   "windows": {
     "architecture": "x64"
