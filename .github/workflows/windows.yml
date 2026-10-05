@@ -1,0 +1,316 @@
+name: Windows CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "release/**"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  matrix:
+    name: Resolve supported PostgreSQL versions
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.meta.outputs.matrix }}
+      upstream_repository: ${{ steps.meta.outputs.upstream_repository }}
+      upstream_ref: ${{ steps.meta.outputs.upstream_ref }}
+      upstream_version: ${{ steps.meta.outputs.upstream_version }}
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@v4
+
+      - name: Resolve maintained PostgreSQL versions
+        id: meta
+        shell: pwsh
+        run: |
+          $config = Get-Content "config/postgresql.json" -Raw | ConvertFrom-Json
+          $today = [DateTime]::UtcNow.Date
+
+          $supported = @(
+            $config.postgresql | Where-Object {
+              [DateTime]::ParseExact(
+                $_.eol,
+                "yyyy-MM-dd",
+                [Globalization.CultureInfo]::InvariantCulture
+              ).Date -ge $today
+            }
+          )
+
+          if ($supported.Count -eq 0) {
+            throw "No maintained PostgreSQL versions remain in config/postgresql.json."
+          }
+
+          $matrix = @{ include = $supported } | ConvertTo-Json -Compress -Depth 8
+          "matrix=$matrix" >> $env:GITHUB_OUTPUT
+          "upstream_repository=$($config.upstream.repository)" >> $env:GITHUB_OUTPUT
+          "upstream_ref=$($config.upstream.ref)" >> $env:GITHUB_OUTPUT
+          "upstream_version=$($config.upstream.version)" >> $env:GITHUB_OUTPUT
+
+          Write-Host "Build matrix: $matrix"
+
+  build:
+    name: PostgreSQL ${{ matrix.major }} / Windows x64
+    needs: matrix
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.matrix) }}
+
+    steps:
+      - name: Check out packaging repository
+        uses: actions/checkout@v4
+
+      - name: Check out official pg_bigm source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ needs.matrix.outputs.upstream_repository }}
+          ref: ${{ needs.matrix.outputs.upstream_ref }}
+          path: upstream
+
+      - name: Verify upstream license matches repository license
+        shell: pwsh
+        run: |
+          $repoLicense = (Get-FileHash "LICENSE" -Algorithm SHA256).Hash
+          $upstreamLicense = (Get-FileHash "upstream/LICENSE" -Algorithm SHA256).Hash
+
+          if ($repoLicense -ne $upstreamLicense) {
+            throw "LICENSE differs from the pinned upstream pg_bigm source."
+          }
+
+      - name: Install PostgreSQL ${{ matrix.major }}
+        shell: pwsh
+        run: |
+          $package = "${{ matrix.chocolateyPackage }}"
+          $version = "${{ matrix.chocolateyVersion }}"
+          $testPort = "${{ matrix.testPort }}"
+
+          & choco install $package "--version=$version" --yes --no-progress --params "/Password:postgres"
+          $code = $LASTEXITCODE
+
+          if (@(0, 1641, 3010) -notcontains $code) {
+            throw "Chocolatey failed with exit code $code."
+          }
+
+          $pgRoot = Join-Path $env:ProgramFiles "PostgreSQL\${{ matrix.major }}"
+
+          if (-not (Test-Path "$pgRoot\include\server\postgres.h")) {
+            throw "PostgreSQL server headers were not found: $pgRoot\include\server\postgres.h"
+          }
+
+          if (-not (Test-Path "$pgRoot\lib\postgres.lib")) {
+            throw "PostgreSQL import library was not found: $pgRoot\lib\postgres.lib"
+          }
+
+          "PGROOT=$pgRoot" >> $env:GITHUB_ENV
+          "PGPORT=$testPort" >> $env:GITHUB_ENV
+
+      - name: Configure and build pg_bigm
+        shell: pwsh
+        run: |
+          cmake -S . -B build -A x64 "-DPGROOT=$env:PGROOT" "-DUPSTREAM_DIR=$PWD\upstream"
+          if ($LASTEXITCODE -ne 0) {
+            throw "CMake configure failed."
+          }
+
+          cmake --build build --config Release
+          if ($LASTEXITCODE -ne 0) {
+            throw "CMake build failed."
+          }
+
+          if (-not (Test-Path "build\Release\pg_bigm.dll")) {
+            throw "Expected pg_bigm.dll was not produced."
+          }
+
+      - name: Install extension into test PostgreSQL
+        shell: pwsh
+        run: |
+          Copy-Item "build\Release\pg_bigm.dll" "$env:PGROOT\lib\pg_bigm.dll" -Force
+          Copy-Item "upstream\pg_bigm.control" "$env:PGROOT\share\extension\pg_bigm.control" -Force
+          Copy-Item "upstream\pg_bigm--*.sql" "$env:PGROOT\share\extension\" -Force
+
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $initdb = Join-Path $env:PGROOT "bin\initdb.exe"
+          $pgCtl = Join-Path $env:PGROOT "bin\pg_ctl.exe"
+          $pgIsReady = Join-Path $env:PGROOT "bin\pg_isready.exe"
+          $psql = Join-Path $env:PGROOT "bin\psql.exe"
+          $dataDir = Join-Path $env:RUNNER_TEMP "pg_bigm-pg${{ matrix.major }}-data"
+          $logFile = Join-Path $env:RUNNER_TEMP "pg_bigm-pg${{ matrix.major }}.log"
+
+          if (Test-Path $dataDir) {
+            Remove-Item $dataDir -Recurse -Force
+          }
+
+          & $initdb -D $dataDir -U postgres -A trust --encoding=UTF8 --no-locale
+          if ($LASTEXITCODE -ne 0) {
+            throw "initdb failed."
+          }
+
+          function Show-PostgresLog {
+            if (Test-Path $logFile) {
+              Write-Host "----- PostgreSQL log -----"
+              Get-Content $logFile -Tail 200
+              Write-Host "--------------------------"
+            }
+          }
+
+          function Wait-Postgres {
+            for ($i = 0; $i -lt 45; $i++) {
+              & $pgIsReady -h 127.0.0.1 -p $env:PGPORT -q
+              if ($LASTEXITCODE -eq 0) {
+                return
+              }
+              Start-Sleep -Seconds 2
+            }
+
+            Show-PostgresLog
+            throw "Temporary PostgreSQL cluster did not become ready."
+          }
+
+          try {
+            & $pgCtl -D $dataDir -l $logFile -o "-p $env:PGPORT -c shared_preload_libraries=pg_bigm" start
+            if ($LASTEXITCODE -ne 0) {
+              Show-PostgresLog
+              throw "Failed to start temporary PostgreSQL cluster."
+            }
+
+            Wait-Postgres
+
+            & $psql -h 127.0.0.1 -p $env:PGPORT -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP EXTENSION IF EXISTS pg_bigm CASCADE;"
+            if ($LASTEXITCODE -ne 0) { throw "DROP EXTENSION pre-clean failed." }
+
+            & $psql -h 127.0.0.1 -p $env:PGPORT -U postgres -d postgres -v ON_ERROR_STOP=1 -c "CREATE EXTENSION pg_bigm;"
+            if ($LASTEXITCODE -ne 0) { throw "CREATE EXTENSION pg_bigm failed." }
+
+            & $psql -h 127.0.0.1 -p $env:PGPORT -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS ci_bigm; CREATE TABLE ci_bigm(v text); INSERT INTO ci_bigm VALUES ('abcdef'), ('uvwxyz'); CREATE INDEX ci_bigm_idx ON ci_bigm USING gin (v gin_bigm_ops);"
+            if ($LASTEXITCODE -ne 0) { throw "pg_bigm GIN index setup failed." }
+
+            $count = (
+              & $psql -h 127.0.0.1 -p $env:PGPORT -U postgres -d postgres -Atqc "SET enable_seqscan=off; SELECT count(*) FROM ci_bigm WHERE v LIKE likequery('bcd');"
+            ) | Select-Object -Last 1
+
+            if ($LASTEXITCODE -ne 0 -or $count.Trim() -ne "1") {
+              throw "pg_bigm search smoke test failed. Expected 1 row, got '$count'."
+            }
+
+            & $psql -h 127.0.0.1 -p $env:PGPORT -U postgres -d postgres -v ON_ERROR_STOP=1 -c "DROP TABLE ci_bigm; DROP EXTENSION pg_bigm;"
+            if ($LASTEXITCODE -ne 0) { throw "Smoke-test cleanup failed." }
+          }
+          catch {
+            Show-PostgresLog
+            throw
+          }
+          finally {
+            if (Test-Path (Join-Path $dataDir "postmaster.pid")) {
+              & $pgCtl -D $dataDir -m fast stop
+            }
+          }
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $assetName = "pg_bigm-${{ needs.matrix.outputs.upstream_ref }}-pg${{ matrix.major }}-windows-x64"
+          $stage = Join-Path $PWD "dist\$assetName"
+
+          New-Item -ItemType Directory -Force -Path "$stage\lib" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage\share\extension" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage\docs" | Out-Null
+
+          Copy-Item "build\Release\pg_bigm.dll" "$stage\lib\pg_bigm.dll"
+          Copy-Item "upstream\pg_bigm.control" "$stage\share\extension\pg_bigm.control"
+          Copy-Item "upstream\pg_bigm--*.sql" "$stage\share\extension\"
+          Copy-Item "upstream\LICENSE" "$stage\LICENSE"
+          Copy-Item "upstream\README.md" "$stage\UPSTREAM-README.md"
+
+          if (Test-Path "upstream\docs\pg_bigm.md") {
+            Copy-Item "upstream\docs\pg_bigm.md" "$stage\docs\pg_bigm.md"
+          }
+          if (Test-Path "upstream\docs\pg_bigm_en.md") {
+            Copy-Item "upstream\docs\pg_bigm_en.md" "$stage\docs\pg_bigm_en.md"
+          }
+
+          $upstreamSha = (git -C upstream rev-parse HEAD).Trim()
+          @"
+          pg_bigm Windows binary package
+          =================================
+
+          Upstream repository: ${{ needs.matrix.outputs.upstream_repository }}
+          Upstream ref:        ${{ needs.matrix.outputs.upstream_ref }}
+          Upstream commit:     $upstreamSha
+          pg_bigm version:     ${{ needs.matrix.outputs.upstream_version }}
+          PostgreSQL major:    ${{ matrix.major }}
+          PostgreSQL tested:   ${{ matrix.minor }}
+          Architecture:        Windows x64
+          Compiler:            MSVC (GitHub-hosted windows-latest)
+          License:             PostgreSQL License; see LICENSE
+
+          This is an unofficial Windows binary package.
+          The pg_bigm upstream documentation is authoritative.
+          "@ | Set-Content -Path "$stage\PACKAGE-INFO.txt" -Encoding utf8
+
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist\$assetName.zip" -CompressionLevel Optimal
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg_bigm-pg${{ matrix.major }}-windows-x64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/heads/release/')
+    needs:
+      - matrix
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all Windows packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pg_bigm-pg*-windows-x64
+          path: dist
+          merge-multiple: true
+
+      - name: Create checksums and release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd dist
+          sha256sum ./*.zip > SHA256SUMS.txt
+          cd ..
+
+          tag="${GITHUB_REF_NAME#release/}"
+
+          cat > release-notes.md <<EOF
+          Unofficial Windows x64 binaries of pg_bigm built from upstream ${{ needs.matrix.outputs.upstream_repository }} at ${{ needs.matrix.outputs.upstream_ref }}.
+
+          Every ZIP was compiled and smoke-tested on GitHub Actions against the PostgreSQL major version in its filename. The build matrix includes only PostgreSQL versions whose configured community EOL date has not passed.
+
+          Upstream pg_bigm documentation and license remain authoritative.
+          EOF
+
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Publish Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release create "$RELEASE_TAG"             dist/*.zip             dist/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --target "$GITHUB_SHA"             --title "$RELEASE_TAG"             --notes-file release-notes.md

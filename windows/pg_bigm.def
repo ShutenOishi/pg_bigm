@@ -1,0 +1,14 @@
+LIBRARY pg_bigm
+
+EXPORTS
+    show_bigm
+    bigmtextcmp
+    likequery
+    bigm_similarity
+    bigm_similarity_op
+    gin_extract_value_bigm
+    gin_extract_query_bigm
+    gin_bigm_consistent
+    gin_bigm_compare_partial
+    pg_gin_pending_stats
+    gin_bigm_triconsistent
