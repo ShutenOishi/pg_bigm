@@ -11,12 +11,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $meta = Get-Content (Join-Path $UpstreamDir "META.json") -Raw | ConvertFrom-Json
-$repackVersion = [string]$meta.version
+$version = [string]$meta.version
 
 $dll = Join-Path $UpstreamDir "pg_repack.dll"
 $exe = Join-Path $UpstreamDir "pg_repack.exe"
 $control = Join-Path $UpstreamDir "lib\pg_repack.control"
-$sql = Join-Path $UpstreamDir "lib\pg_repack--$repackVersion.sql"
+$sql = Join-Path $UpstreamDir "lib\pg_repack--$version.sql"
 $extensionDir = Join-Path $PgRoot "share\extension"
 
 foreach ($path in @($dll, $exe, $control, $sql)) {
@@ -28,4 +28,4 @@ foreach ($path in @($dll, $exe, $control, $sql)) {
 Copy-Item $dll (Join-Path $PgRoot "lib\pg_repack.dll") -Force
 Copy-Item $exe (Join-Path $PgRoot "bin\pg_repack.exe") -Force
 Copy-Item $control (Join-Path $extensionDir "pg_repack.control") -Force
-Copy-Item $sql (Join-Path $extensionDir "pg_repack--$repackVersion.sql") -Force
+Copy-Item $sql (Join-Path $extensionDir "pg_repack--$version.sql") -Force
