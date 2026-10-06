@@ -1,0 +1,20 @@
+name: Step 7 PACKAGE-INFO Attestation Probe
+
+on:
+  push:
+    branches:
+      - step7-attestation-probe
+
+permissions:
+  contents: read
+
+jobs:
+  provenance_probe:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: pgextwin/build/.github/workflows/build-extension-attested.yml@3cf92ecb1b34b4db9e92fa2de6d9ccdd5215fe7f
+    with:
+      extension_config_path: config/extension-step7-probe.json
