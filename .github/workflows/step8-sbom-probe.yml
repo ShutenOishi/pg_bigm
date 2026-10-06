@@ -1,0 +1,21 @@
+name: Step 8 SBOM Attestation Probe
+
+on:
+  push:
+    branches:
+      - step8-sbom-attestation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: pgextwin/build/.github/workflows/build-extension-attested.yml@596f0437b09c815245b09dc91c9bf5d07e65b9c4
+    with:
+      extension_config_path: config/extension-step8-probe.json
