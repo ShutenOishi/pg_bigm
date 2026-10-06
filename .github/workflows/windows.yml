@@ -13,10 +13,21 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows:
-    uses: pgextwin/build/.github/workflows/build-extension.yml@main
+    if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
+    permissions:
+      contents: read
+    uses: pgextwin/build/.github/workflows/build-extension.yml@b9450e4489156e1a39ff0ee50fb8f78dd619a178
+    with:
+      extension_config_path: config/extension.json
+
+  release:
+    if: ${{ startsWith(github.ref, 'refs/heads/release/') }}
+    permissions:
+      contents: write
+    uses: pgextwin/build/.github/workflows/build-extension.yml@b9450e4489156e1a39ff0ee50fb8f78dd619a178
     with:
       extension_config_path: config/extension.json
