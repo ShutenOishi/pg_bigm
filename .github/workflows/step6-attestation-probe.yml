@@ -1,0 +1,21 @@
+name: Step 6 Artifact Attestation Probe
+
+on:
+  push:
+    branches:
+      - step6-artifact-attestation
+
+permissions:
+  contents: read
+
+jobs:
+  provenance_probe:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: pgextwin/build/.github/workflows/build-extension.yml@e688baaef5f7e260d2fafcd57c08c859980698d5
+    with:
+      extension_config_path: config/extension-step6-probe.json
+      attest_provenance: true
