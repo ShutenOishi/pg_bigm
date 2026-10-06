@@ -1,0 +1,28 @@
+name: Step 6 Permission Boundary Probe
+
+on:
+  push:
+    branches:
+      - step6-artifact-attestation
+
+permissions:
+  contents: read
+
+jobs:
+  normal_probe:
+    permissions:
+      contents: read
+    uses: pgextwin/build/.github/workflows/build-extension.yml@d0d2e711bc3033cf1e051c3dad3ce37cce952e41
+    with:
+      extension_config_path: config/extension-step6-probe.json
+
+  attested_probe:
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: pgextwin/build/.github/workflows/build-extension.yml@d0d2e711bc3033cf1e051c3dad3ce37cce952e41
+    with:
+      extension_config_path: config/extension-step6-probe.json
+      attest_provenance: true
