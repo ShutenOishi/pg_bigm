@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "pg_bigm",
+  "upstream": {
+    "repository": "pgbigm/pg_bigm",
+    "ref": "v1.2-20250903",
+    "version": "1.2"
+  },
+  "postgresql": {
+    "minMajor": 18,
+    "maxMajor": 18
+  },
+  "windows": {
+    "architecture": "x64"
+  },
+  "license": {
+    "verifyAgainstUpstream": true,
+    "upstreamPath": "LICENSE"
+  }
+}
