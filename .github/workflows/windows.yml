@@ -17,17 +17,18 @@ permissions:
 
 jobs:
   windows:
-    if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
     permissions:
       contents: read
-    uses: pgextwin/build/.github/workflows/build-extension.yml@b9450e4489156e1a39ff0ee50fb8f78dd619a178
+    uses: pgextwin/build/.github/workflows/build-extension.yml@d002b6cd38325de18f4016f50ef7bce7f65b8e57
     with:
       extension_config_path: config/extension.json
 
   release:
     if: ${{ startsWith(github.ref, 'refs/heads/release/') }}
+    needs: windows
     permissions:
       contents: write
-    uses: pgextwin/build/.github/workflows/build-extension.yml@b9450e4489156e1a39ff0ee50fb8f78dd619a178
+    uses: pgextwin/build/.github/workflows/release-extension.yml@d002b6cd38325de18f4016f50ef7bce7f65b8e57
     with:
-      extension_config_path: config/extension.json
+      extension_name: ${{ needs.windows.outputs.extension_name }}
+      upstream_repository: ${{ needs.windows.outputs.upstream_repository }}
