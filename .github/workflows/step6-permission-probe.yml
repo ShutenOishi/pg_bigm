@@ -12,7 +12,7 @@ jobs:
   normal_probe:
     permissions:
       contents: read
-    uses: pgextwin/build/.github/workflows/build-extension.yml@d0d2e711bc3033cf1e051c3dad3ce37cce952e41
+    uses: pgextwin/build/.github/workflows/build-extension.yml@b5fc97c2e10cf58af2dc15a6c75551ee6677e9ce
     with:
       extension_config_path: config/extension-step6-probe.json
 
@@ -22,7 +22,6 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    uses: pgextwin/build/.github/workflows/build-extension.yml@d0d2e711bc3033cf1e051c3dad3ce37cce952e41
+    uses: pgextwin/build/.github/workflows/build-extension-attested.yml@b5fc97c2e10cf58af2dc15a6c75551ee6677e9ce
     with:
       extension_config_path: config/extension-step6-probe.json
-      attest_provenance: true
