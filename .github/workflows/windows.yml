@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "release/**"
+      - step8-attestation-probe-v1541
   workflow_dispatch:
 
 concurrency:
@@ -17,7 +18,7 @@ permissions:
 
 jobs:
   windows:
-    if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
+    if: ${{ !startsWith(github.ref, 'refs/heads/release/') && github.ref != 'refs/heads/step8-attestation-probe-v1541' }}
     permissions:
       contents: read
     uses: pgextwin/build/.github/workflows/build-extension.yml@596f0437b09c815245b09dc91c9bf5d07e65b9c4
@@ -25,7 +26,7 @@ jobs:
       extension_config_path: config/extension.json
 
   release_build:
-    if: ${{ startsWith(github.ref, 'refs/heads/release/') }}
+    if: ${{ startsWith(github.ref, 'refs/heads/release/') || github.ref == 'refs/heads/step8-attestation-probe-v1541' }}
     permissions:
       contents: read
       id-token: write

@@ -7,7 +7,7 @@
     "version": "1.2"
   },
   "postgresql": {
-    "minMajor": 14,
+    "minMajor": 18,
     "maxMajor": 18
   },
   "windows": {
