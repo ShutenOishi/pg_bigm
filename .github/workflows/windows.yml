@@ -17,18 +17,31 @@ permissions:
 
 jobs:
   windows:
+    if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
     permissions:
       contents: read
-    uses: pgextwin/build/.github/workflows/build-extension.yml@d002b6cd38325de18f4016f50ef7bce7f65b8e57
+    uses: pgextwin/build/.github/workflows/build-extension.yml@e688baaef5f7e260d2fafcd57c08c859980698d5
     with:
       extension_config_path: config/extension.json
 
+  release_build:
+    if: ${{ startsWith(github.ref, 'refs/heads/release/') }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    uses: pgextwin/build/.github/workflows/build-extension.yml@e688baaef5f7e260d2fafcd57c08c859980698d5
+    with:
+      extension_config_path: config/extension.json
+      attest_provenance: true
+
   release:
     if: ${{ startsWith(github.ref, 'refs/heads/release/') }}
-    needs: windows
+    needs: release_build
     permissions:
       contents: write
-    uses: pgextwin/build/.github/workflows/release-extension.yml@d002b6cd38325de18f4016f50ef7bce7f65b8e57
+    uses: pgextwin/build/.github/workflows/release-extension.yml@e688baaef5f7e260d2fafcd57c08c859980698d5
     with:
-      extension_name: ${{ needs.windows.outputs.extension_name }}
-      upstream_repository: ${{ needs.windows.outputs.upstream_repository }}
+      extension_name: ${{ needs.release_build.outputs.extension_name }}
+      upstream_repository: ${{ needs.release_build.outputs.upstream_repository }}
