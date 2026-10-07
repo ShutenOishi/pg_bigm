@@ -1,0 +1,37 @@
+{
+  "contractVersion": 2,
+  "extension": "pg_bigm",
+  "smokeTest": {
+    "script": "windows/ci/smoke-test.ps1"
+  },
+  "runtimeRequirements": {
+    "extensionCreation": "required",
+    "preload": "either",
+    "backgroundWorker": false,
+    "clientExecutable": {
+      "required": false,
+      "packagePaths": []
+    }
+  },
+  "testSetup": {
+    "preload": "shared",
+    "backgroundWorker": false,
+    "settings": []
+  },
+  "coverage": {
+    "createExtension": "covered",
+    "backgroundWorker": "not-applicable",
+    "clientExecutable": "not-applicable",
+    "serverLogAssertions": "not-applicable",
+    "upgrade": "not-covered"
+  },
+  "functionalScenarios": [
+    {
+      "id": "gin-bigram-search",
+      "description": "Builds a GIN index with gin_bigm_ops and verifies a LIKE/likequery bigram search returns the expected row.",
+      "evidence": [
+        "sql-result"
+      ]
+    }
+  ]
+}
