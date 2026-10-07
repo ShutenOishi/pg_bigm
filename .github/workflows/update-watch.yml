@@ -1,0 +1,28 @@
+name: Upstream update watch
+
+on:
+  schedule:
+    # GitHub Actions cron uses UTC; schedules are staggered across the initial repositories.
+    - cron: "11 3 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Detect and summarize without changing Issues
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  watch:
+    permissions:
+      contents: read
+      issues: write
+    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@be0aca9b486ca007aad2c0d93f05bd4a397a3fd7
+    with:
+      extension_config_path: config/extension.json
+      update_watch_path: config/update-watch.json
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
