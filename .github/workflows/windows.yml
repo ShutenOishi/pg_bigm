@@ -1,4 +1,5 @@
 name: Windows CI/CD
+# Step 10 vulnerability baseline: report-only; shared build is immutable-SHA pinned.
 
 on:
   pull_request:
