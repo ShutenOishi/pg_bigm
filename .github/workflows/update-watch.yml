@@ -21,7 +21,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@09c0f7f51b4a8db53af203b37aebc2030e9eaebe
+    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@be0aca9b486ca007aad2c0d93f05bd4a397a3fd7
     with:
       extension_config_path: config/extension.json
       update_watch_path: config/update-watch.json
