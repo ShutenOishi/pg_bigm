@@ -20,7 +20,7 @@ jobs:
     if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
     permissions:
       contents: read
-    uses: pgextwin/build/.github/workflows/build-extension.yml@719be337c15b2d3f01e0ee9560cc790d82b8bcda
+    uses: pgextwin/build/.github/workflows/build-extension.yml@2afe13633750cdeb5237b15c1c31ea4dffb21c90
     with:
       extension_config_path: config/extension.json
       test_contract_path: config/test-contract.json
@@ -32,7 +32,7 @@ jobs:
       id-token: write
       attestations: write
       artifact-metadata: write
-    uses: pgextwin/build/.github/workflows/build-extension-attested.yml@719be337c15b2d3f01e0ee9560cc790d82b8bcda
+    uses: pgextwin/build/.github/workflows/build-extension-attested.yml@2afe13633750cdeb5237b15c1c31ea4dffb21c90
     with:
       extension_config_path: config/extension.json
       test_contract_path: config/test-contract.json
@@ -42,7 +42,7 @@ jobs:
     needs: release_build
     permissions:
       contents: write
-    uses: pgextwin/build/.github/workflows/release-extension.yml@719be337c15b2d3f01e0ee9560cc790d82b8bcda
+    uses: pgextwin/build/.github/workflows/release-extension.yml@2afe13633750cdeb5237b15c1c31ea4dffb21c90
     with:
       extension_name: ${{ needs.release_build.outputs.extension_name }}
       upstream_repository: ${{ needs.release_build.outputs.upstream_repository }}
