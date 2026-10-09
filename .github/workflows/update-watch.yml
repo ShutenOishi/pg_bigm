@@ -1,6 +1,11 @@
 name: Upstream update watch
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/update-watch.yml
   schedule:
     # Daily UTC 00:00 (09:00 JST) target; actual GitHub start may be delayed.
     - cron: "0 0 * * *"
@@ -25,7 +30,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@21c99b933da98f397f739971e738ecb685fe55d2
+    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@16b886b9d06d6f389b369b87ce0c155767697ca0
     with:
       extension_config_path: config/extension.json
       update_watch_path: config/update-watch.json
@@ -37,7 +42,7 @@ jobs:
       contents: write
       pull-requests: write
       actions: write
-    uses: pgextwin/build/.github/workflows/candidate-update.yml@21c99b933da98f397f739971e738ecb685fe55d2
+    uses: pgextwin/build/.github/workflows/candidate-update.yml@16b886b9d06d6f389b369b87ce0c155767697ca0
     with:
       extension_config_path: config/extension.json
       update_watch_path: config/update-watch.json
