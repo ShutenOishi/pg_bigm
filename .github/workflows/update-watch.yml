@@ -2,15 +2,19 @@ name: Upstream update watch
 
 on:
   schedule:
-    # GitHub Actions cron uses UTC; schedules are staggered across the initial repositories.
-    - cron: "11 3 * * *"
+    # Daily UTC 00:00 (09:00 JST) target; actual GitHub start may be delayed.
+    - cron: "0 0 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Detect and summarize without changing Issues
+        description: Do not mutate Issues or candidate state
         required: false
         type: boolean
         default: true
+
+concurrency:
+  group: upstream-watch-${{ github.repository }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -21,8 +25,21 @@ jobs:
     permissions:
       contents: read
       issues: write
-    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@8246f4d3415a48b1ad4af13f421277057886b58f
+    uses: pgextwin/build/.github/workflows/check-extension-updates.yml@21c99b933da98f397f739971e738ecb685fe55d2
     with:
       extension_config_path: config/extension.json
       update_watch_path: config/update-watch.json
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+
+  candidate:
+    needs: watch
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    uses: pgextwin/build/.github/workflows/candidate-update.yml@21c99b933da98f397f739971e738ecb685fe55d2
+    with:
+      extension_config_path: config/extension.json
+      update_watch_path: config/update-watch.json
+      candidate_policy_path: config/candidate-build.json
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
