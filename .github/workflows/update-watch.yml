@@ -1,6 +1,8 @@
 name: Upstream update watch
 
 on:
+  # On main workflow-file changes, run a read-only acceptance check. Daily
+  # schedule remains the only unattended candidate-producing event.
   push:
     branches:
       - main
@@ -34,7 +36,7 @@ jobs:
     with:
       extension_config_path: config/extension.json
       update_watch_path: config/update-watch.json
-      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      dry_run: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
 
   candidate:
     needs: watch
@@ -47,4 +49,4 @@ jobs:
       extension_config_path: config/extension.json
       update_watch_path: config/update-watch.json
       candidate_policy_path: config/candidate-build.json
-      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+      dry_run: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
