@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: windows-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
     if: ${{ !startsWith(github.ref, 'refs/heads/release/') }}
     permissions:
       contents: read
-    uses: pgextwin/build/.github/workflows/build-extension.yml@8246f4d3415a48b1ad4af13f421277057886b58f
+    uses: pgextwin/build/.github/workflows/build-extension.yml@21c99b933da98f397f739971e738ecb685fe55d2
     with:
       extension_config_path: config/extension.json
       test_contract_path: config/test-contract.json
@@ -46,3 +46,15 @@ jobs:
     with:
       extension_name: ${{ needs.release_build.outputs.extension_name }}
       upstream_repository: ${{ needs.release_build.outputs.upstream_repository }}
+
+  candidate_report:
+    name: Verify candidate Windows matrix and artifacts
+    if: ${{ always() && github.event_name == 'workflow_dispatch' && startsWith(github.ref, 'refs/heads/auto-candidate/') }}
+    needs: windows
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    uses: pgextwin/build/.github/workflows/verify-candidate.yml@21c99b933da98f397f739971e738ecb685fe55d2
+    with:
+      matrix_result: ${{ needs.windows.result }}
